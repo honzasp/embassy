@@ -85,13 +85,13 @@ impl_peri!(MCO1, Mco1Source, set_mco1sel, set_mco1pre);
 #[cfg(mco2)]
 impl_peri!(MCO2, Mco2Source, set_mco2sel, set_mco2pre);
 
-pub struct Mco<'d, T: McoInstance> {
-    phantom: PhantomData<&'d mut T>,
+pub struct Mco<'d> {
+    phantom: PhantomData<&'d mut ()>,
 }
 
-impl<'d, T: McoInstance> Mco<'d, T> {
+impl<'d> Mco<'d> {
     /// Create a new MCO instance.
-    pub fn new(
+    pub fn new<T: McoInstance>(
         _peri: impl Peripheral<P = T> + 'd,
         pin: impl Peripheral<P = impl McoPin<T>> + 'd,
         source: T::Source,
