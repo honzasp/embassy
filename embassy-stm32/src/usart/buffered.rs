@@ -13,7 +13,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 use super::DePin;
 use super::{
     clear_interrupt_flags, configure, rdr, reconfigure, sr, tdr, BasicInstance, Config, ConfigError, CtsPin, Error,
-    RtsPin, RxPin, TxPin,
+    Regs, RtsPin, RxPin, TxPin, Vtable,
 };
 use crate::gpio::AFType;
 use crate::interrupt;
