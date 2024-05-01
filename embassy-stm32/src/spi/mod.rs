@@ -6,14 +6,14 @@ use core::ptr;
 
 use embassy_embedded_hal::SetConfig;
 use embassy_futures::join::join;
-use embassy_hal_internal::{into_ref, PeripheralRef};
+use embassy_hal_internal::PeripheralRef;
 pub use embedded_hal_02::spi::{Mode, Phase, Polarity, MODE_0, MODE_1, MODE_2, MODE_3};
 
 use crate::dma::{slice_ptr_parts, word, ChannelAndRequest};
 use crate::gpio::{AFType, AnyPin, Pull, SealedPin as _, Speed};
 use crate::mode::{Async, Blocking, Mode as PeriMode};
 use crate::pac::spi::{regs, vals, Spi as Regs};
-use crate::rcc::RccPeripheral;
+use crate::rcc::{RccPeripheral, SealedRccPeripheral};
 use crate::time::Hertz;
 use crate::{peripherals, Peripheral};
 
@@ -92,20 +92,20 @@ impl Config {
     }
 }
 /// SPI driver.
-pub struct Spi<'d, T: Instance, M: PeriMode> {
-    _peri: PeripheralRef<'d, T>,
+pub struct Spi<'d, M: PeriMode> {
+    vtable: &'static Vtable,
     sck: Option<PeripheralRef<'d, AnyPin>>,
     mosi: Option<PeripheralRef<'d, AnyPin>>,
     miso: Option<PeripheralRef<'d, AnyPin>>,
     tx_dma: Option<ChannelAndRequest<'d>>,
     rx_dma: Option<ChannelAndRequest<'d>>,
-    _phantom: PhantomData<M>,
     current_word_size: word_impl::Config,
+    _phantom: PhantomData<M>,
 }
 
-impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
-    fn new_inner(
-        peri: impl Peripheral<P = T> + 'd,
+impl<'d, M: PeriMode> Spi<'d, M> {
+    fn new_inner<T: Instance>(
+        _peri: impl Peripheral<P = T>,
         sck: Option<PeripheralRef<'d, AnyPin>>,
         mosi: Option<PeripheralRef<'d, AnyPin>>,
         miso: Option<PeripheralRef<'d, AnyPin>>,
@@ -113,25 +113,25 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
         rx_dma: Option<ChannelAndRequest<'d>>,
         config: Config,
     ) -> Self {
-        into_ref!(peri);
-
         let pclk = T::frequency();
         let freq = config.frequency;
         let br = compute_baud_rate(pclk, freq);
 
         let cpha = config.raw_phase();
         let cpol = config.raw_polarity();
-
         let lsbfirst = config.raw_byte_order();
 
         T::enable_and_reset();
 
+        let vtable = T::vtable();
+        let regs = vtable.regs;
+
         #[cfg(any(spi_v1, spi_f1))]
         {
-            T::REGS.cr2().modify(|w| {
+            regs.cr2().modify(|w| {
                 w.set_ssoe(false);
             });
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_cpha(cpha);
                 w.set_cpol(cpol);
 
@@ -149,15 +149,16 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
                 w.set_dff(<u8 as SealedWord>::CONFIG)
             });
         }
+
         #[cfg(spi_v2)]
         {
-            T::REGS.cr2().modify(|w| {
+            regs.cr2().modify(|w| {
                 let (ds, frxth) = <u8 as SealedWord>::CONFIG;
                 w.set_frxth(frxth);
                 w.set_ds(ds);
                 w.set_ssoe(false);
             });
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_cpha(cpha);
                 w.set_cpol(cpol);
 
@@ -171,10 +172,11 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
                 w.set_spe(true);
             });
         }
+
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
         {
-            T::REGS.ifcr().write(|w| w.0 = 0xffff_ffff);
-            T::REGS.cfg2().modify(|w| {
+            regs.ifcr().write(|w| w.0 = 0xffff_ffff);
+            regs.cfg2().modify(|w| {
                 //w.set_ssoe(true);
                 w.set_ssoe(false);
                 w.set_cpha(cpha);
@@ -189,23 +191,23 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
                 w.set_afcntr(true);
                 w.set_ssiop(vals::Ssiop::ACTIVEHIGH);
             });
-            T::REGS.cfg1().modify(|w| {
+            regs.cfg1().modify(|w| {
                 w.set_crcen(false);
                 w.set_mbr(br);
                 w.set_dsize(<u8 as SealedWord>::CONFIG);
                 w.set_fthlv(vals::Fthlv::ONEFRAME);
             });
-            T::REGS.cr2().modify(|w| {
+            regs.cr2().modify(|w| {
                 w.set_tsize(0);
             });
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_ssi(false);
                 w.set_spe(true);
             });
         }
 
         Self {
-            _peri: peri,
+            vtable,
             sck,
             mosi,
             miso,
@@ -218,17 +220,18 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
 
     /// Reconfigures it with the supplied config.
     pub fn set_config(&mut self, config: &Config) -> Result<(), ()> {
-        let cpha = config.raw_phase();
-        let cpol = config.raw_polarity();
-
-        let lsbfirst = config.raw_byte_order();
-
-        let pclk = T::frequency();
+        let pclk = (self.vtable.frequency_fn)();
         let freq = config.frequency;
         let br = compute_baud_rate(pclk, freq);
 
+        let cpha = config.raw_phase();
+        let cpol = config.raw_polarity();
+        let lsbfirst = config.raw_byte_order();
+
+        let regs = self.vtable.regs;
+
         #[cfg(any(spi_v1, spi_f1, spi_v2))]
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_cpha(cpha);
             w.set_cpol(cpol);
             w.set_br(br);
@@ -237,26 +240,29 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
 
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
         {
-            T::REGS.cfg2().modify(|w| {
+            regs.cfg2().modify(|w| {
                 w.set_cpha(cpha);
                 w.set_cpol(cpol);
                 w.set_lsbfirst(lsbfirst);
             });
-            T::REGS.cfg1().modify(|w| {
+            regs.cfg1().modify(|w| {
                 w.set_mbr(br);
             });
         }
+
         Ok(())
     }
 
     /// Get current SPI configuration.
     pub fn get_current_config(&self) -> Config {
+        let regs = self.vtable.regs;
+
         #[cfg(any(spi_v1, spi_f1, spi_v2))]
-        let cfg = T::REGS.cr1().read();
+        let cfg = regs.cr1().read();
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
-        let cfg = T::REGS.cfg2().read();
+        let cfg = regs.cfg2().read();
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
-        let cfg1 = T::REGS.cfg1().read();
+        let cfg1 = regs.cfg1().read();
 
         let polarity = if cfg.cpol() == vals::Cpol::IDLELOW {
             Polarity::IdleLow
@@ -280,7 +286,7 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
         let br = cfg1.mbr();
 
-        let pclk = T::frequency();
+        let pclk = (self.vtable.frequency_fn)();
         let frequency = compute_frequency(pclk, br);
 
         Config {
@@ -295,42 +301,44 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
             return;
         }
 
+        let regs = self.vtable.regs;
+
         #[cfg(any(spi_v1, spi_f1))]
         {
-            T::REGS.cr1().modify(|reg| {
+            regs.cr1().modify(|reg| {
                 reg.set_spe(false);
                 reg.set_dff(word_size)
             });
-            T::REGS.cr1().modify(|reg| {
+            regs.cr1().modify(|reg| {
                 reg.set_spe(true);
             });
         }
         #[cfg(spi_v2)]
         {
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_spe(false);
             });
-            T::REGS.cr2().modify(|w| {
+            regs.cr2().modify(|w| {
                 w.set_frxth(word_size.1);
                 w.set_ds(word_size.0);
             });
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_spe(true);
             });
         }
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
         {
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_csusp(true);
             });
-            while T::REGS.sr().read().eot() {}
-            T::REGS.cr1().modify(|w| {
+            while regs.sr().read().eot() {}
+            regs.cr1().modify(|w| {
                 w.set_spe(false);
             });
-            T::REGS.cfg1().modify(|w| {
+            regs.cfg1().modify(|w| {
                 w.set_dsize(word_size);
             });
-            T::REGS.cr1().modify(|w| {
+            regs.cr1().modify(|w| {
                 w.set_csusp(false);
                 w.set_spe(true);
             });
@@ -341,22 +349,24 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
 
     /// Blocking write.
     pub fn blocking_write<W: Word>(&mut self, words: &[W]) -> Result<(), Error> {
-        T::REGS.cr1().modify(|w| w.set_spe(true));
-        flush_rx_fifo(T::REGS);
+        let regs = self.vtable.regs;
+        regs.cr1().modify(|w| w.set_spe(true));
+        flush_rx_fifo(regs);
         self.set_word_size(W::CONFIG);
         for word in words.iter() {
-            let _ = transfer_word(T::REGS, *word)?;
+            let _ = transfer_word(regs, *word)?;
         }
         Ok(())
     }
 
     /// Blocking read.
     pub fn blocking_read<W: Word>(&mut self, words: &mut [W]) -> Result<(), Error> {
-        T::REGS.cr1().modify(|w| w.set_spe(true));
-        flush_rx_fifo(T::REGS);
+        let regs = self.vtable.regs;
+        regs.cr1().modify(|w| w.set_spe(true));
+        flush_rx_fifo(regs);
         self.set_word_size(W::CONFIG);
         for word in words.iter_mut() {
-            *word = transfer_word(T::REGS, W::default())?;
+            *word = transfer_word(regs, W::default())?;
         }
         Ok(())
     }
@@ -365,11 +375,12 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
     ///
     /// This writes the contents of `data` on MOSI, and puts the received data on MISO in `data`, at the same time.
     pub fn blocking_transfer_in_place<W: Word>(&mut self, words: &mut [W]) -> Result<(), Error> {
-        T::REGS.cr1().modify(|w| w.set_spe(true));
-        flush_rx_fifo(T::REGS);
+        let regs = self.vtable.regs;
+        regs.cr1().modify(|w| w.set_spe(true));
+        flush_rx_fifo(regs);
         self.set_word_size(W::CONFIG);
         for word in words.iter_mut() {
-            *word = transfer_word(T::REGS, *word)?;
+            *word = transfer_word(regs, *word)?;
         }
         Ok(())
     }
@@ -381,13 +392,14 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
     /// The transfer runs for `max(read.len(), write.len())` bytes. If `read` is shorter extra bytes are ignored.
     /// If `write` is shorter it is padded with zero bytes.
     pub fn blocking_transfer<W: Word>(&mut self, read: &mut [W], write: &[W]) -> Result<(), Error> {
-        T::REGS.cr1().modify(|w| w.set_spe(true));
-        flush_rx_fifo(T::REGS);
+        let regs = self.vtable.regs;
+        regs.cr1().modify(|w| w.set_spe(true));
+        flush_rx_fifo(regs);
         self.set_word_size(W::CONFIG);
         let len = read.len().max(write.len());
         for i in 0..len {
             let wb = write.get(i).copied().unwrap_or_default();
-            let rb = transfer_word(T::REGS, wb)?;
+            let rb = transfer_word(regs, wb)?;
             if let Some(r) = read.get_mut(i) {
                 *r = rb;
             }
@@ -396,9 +408,9 @@ impl<'d, T: Instance, M: PeriMode> Spi<'d, T, M> {
     }
 }
 
-impl<'d, T: Instance> Spi<'d, T, Blocking> {
+impl<'d> Spi<'d, Blocking> {
     /// Create a new blocking SPI driver.
-    pub fn new_blocking(
+    pub fn new_blocking<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
@@ -417,7 +429,7 @@ impl<'d, T: Instance> Spi<'d, T, Blocking> {
     }
 
     /// Create a new blocking SPI driver, in RX-only mode (only MISO pin, no MOSI).
-    pub fn new_blocking_rxonly(
+    pub fn new_blocking_rxonly<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         miso: impl Peripheral<P = impl MisoPin<T>> + 'd,
@@ -435,7 +447,7 @@ impl<'d, T: Instance> Spi<'d, T, Blocking> {
     }
 
     /// Create a new blocking SPI driver, in TX-only mode (only MOSI pin, no MISO).
-    pub fn new_blocking_txonly(
+    pub fn new_blocking_txonly<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
@@ -455,7 +467,7 @@ impl<'d, T: Instance> Spi<'d, T, Blocking> {
     /// Create a new SPI driver, in TX-only mode, without SCK pin.
     ///
     /// This can be useful for bit-banging non-SPI protocols.
-    pub fn new_blocking_txonly_nosck(
+    pub fn new_blocking_txonly_nosck<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
         config: Config,
@@ -472,9 +484,9 @@ impl<'d, T: Instance> Spi<'d, T, Blocking> {
     }
 }
 
-impl<'d, T: Instance> Spi<'d, T, Async> {
+impl<'d> Spi<'d, Async> {
     /// Create a new SPI driver.
-    pub fn new(
+    pub fn new<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
@@ -495,7 +507,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     }
 
     /// Create a new SPI driver, in RX-only mode (only MISO pin, no MOSI).
-    pub fn new_rxonly(
+    pub fn new_rxonly<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         miso: impl Peripheral<P = impl MisoPin<T>> + 'd,
@@ -514,7 +526,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     }
 
     /// Create a new SPI driver, in TX-only mode (only MOSI pin, no MISO).
-    pub fn new_txonly(
+    pub fn new_txonly<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         sck: impl Peripheral<P = impl SckPin<T>> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
@@ -535,7 +547,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     /// Create a new SPI driver, in TX-only mode, without SCK pin.
     ///
     /// This can be useful for bit-banging non-SPI protocols.
-    pub fn new_txonly_nosck(
+    pub fn new_txonly_nosck<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         mosi: impl Peripheral<P = impl MosiPin<T>> + 'd,
         tx_dma: impl Peripheral<P = impl TxDma<T>> + 'd,
@@ -554,7 +566,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
 
     #[cfg(stm32wl)]
     /// Useful for on chip peripherals like SUBGHZ which are hardwired.
-    pub fn new_subghz(
+    pub fn new_subghz<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         tx_dma: impl Peripheral<P = impl TxDma<T>> + 'd,
         rx_dma: impl Peripheral<P = impl RxDma<T>> + 'd,
@@ -573,7 +585,7 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn new_internal(
+    pub(crate) fn new_internal<T: Instance>(
         peri: impl Peripheral<P = T> + 'd,
         tx_dma: impl Peripheral<P = impl TxDma<T>> + 'd,
         rx_dma: impl Peripheral<P = impl RxDma<T>> + 'd,
@@ -588,26 +600,28 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
             return Ok(());
         }
 
+        let regs = self.vtable.regs;
+
         self.set_word_size(W::CONFIG);
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_spe(false);
         });
 
-        let tx_dst = T::REGS.tx_ptr();
+        let tx_dst = regs.tx_ptr();
         let tx_f = unsafe { self.tx_dma.as_mut().unwrap().write(data, tx_dst, Default::default()) };
 
-        set_txdmaen(T::REGS, true);
-        T::REGS.cr1().modify(|w| {
+        set_txdmaen(regs, true);
+        regs.cr1().modify(|w| {
             w.set_spe(true);
         });
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_cstart(true);
         });
 
         tx_f.await;
 
-        finish_dma(T::REGS);
+        finish_dma(regs);
 
         Ok(())
     }
@@ -618,23 +632,25 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
             return Ok(());
         }
 
+        let regs = self.vtable.regs;
+
         self.set_word_size(W::CONFIG);
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_spe(false);
         });
 
         // SPIv3 clears rxfifo on SPE=0
         #[cfg(not(any(spi_v3, spi_v4, spi_v5)))]
-        flush_rx_fifo(T::REGS);
+        flush_rx_fifo(regs);
 
-        set_rxdmaen(T::REGS, true);
+        set_rxdmaen(regs, true);
 
         let clock_byte_count = data.len();
 
-        let rx_src = T::REGS.rx_ptr();
+        let rx_src = regs.rx_ptr();
         let rx_f = unsafe { self.rx_dma.as_mut().unwrap().read(rx_src, data, Default::default()) };
 
-        let tx_dst = T::REGS.tx_ptr();
+        let tx_dst = regs.tx_ptr();
         let clock_byte = 0x00u8;
         let tx_f = unsafe {
             self.tx_dma
@@ -643,18 +659,18 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
                 .write_repeated(&clock_byte, clock_byte_count, tx_dst, Default::default())
         };
 
-        set_txdmaen(T::REGS, true);
-        T::REGS.cr1().modify(|w| {
+        set_txdmaen(regs, true);
+        regs.cr1().modify(|w| {
             w.set_spe(true);
         });
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_cstart(true);
         });
 
         join(tx_f, rx_f).await;
 
-        finish_dma(T::REGS);
+        finish_dma(regs);
 
         Ok(())
     }
@@ -667,21 +683,23 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
             return Ok(());
         }
 
+        let regs = self.vtable.regs;
+
         self.set_word_size(W::CONFIG);
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_spe(false);
         });
 
         // SPIv3 clears rxfifo on SPE=0
         #[cfg(not(any(spi_v3, spi_v4, spi_v5)))]
-        flush_rx_fifo(T::REGS);
+        flush_rx_fifo(regs);
 
-        set_rxdmaen(T::REGS, true);
+        set_rxdmaen(regs, true);
 
-        let rx_src = T::REGS.rx_ptr();
+        let rx_src = regs.rx_ptr();
         let rx_f = unsafe { self.rx_dma.as_mut().unwrap().read_raw(rx_src, read, Default::default()) };
 
-        let tx_dst = T::REGS.tx_ptr();
+        let tx_dst = regs.tx_ptr();
         let tx_f = unsafe {
             self.tx_dma
                 .as_mut()
@@ -689,18 +707,18 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
                 .write_raw(write, tx_dst, Default::default())
         };
 
-        set_txdmaen(T::REGS, true);
-        T::REGS.cr1().modify(|w| {
+        set_txdmaen(regs, true);
+        regs.cr1().modify(|w| {
             w.set_spe(true);
         });
         #[cfg(any(spi_v3, spi_v4, spi_v5))]
-        T::REGS.cr1().modify(|w| {
+        regs.cr1().modify(|w| {
             w.set_cstart(true);
         });
 
         join(tx_f, rx_f).await;
 
-        finish_dma(T::REGS);
+        finish_dma(regs);
 
         Ok(())
     }
@@ -723,13 +741,13 @@ impl<'d, T: Instance> Spi<'d, T, Async> {
     }
 }
 
-impl<'d, T: Instance, M: PeriMode> Drop for Spi<'d, T, M> {
+impl<'d, M: PeriMode> Drop for Spi<'d, M> {
     fn drop(&mut self) {
         self.sck.as_ref().map(|x| x.set_as_disconnected());
         self.mosi.as_ref().map(|x| x.set_as_disconnected());
         self.miso.as_ref().map(|x| x.set_as_disconnected());
 
-        T::disable();
+        (self.vtable.disable_fn)();
     }
 }
 
@@ -941,7 +959,7 @@ fn transfer_word<W: Word>(regs: Regs, tx_word: W) -> Result<W, Error> {
 // some marker traits. For details, see https://github.com/rust-embedded/embedded-hal/pull/289
 macro_rules! impl_blocking {
     ($w:ident) => {
-        impl<'d, T: Instance, M: PeriMode> embedded_hal_02::blocking::spi::Write<$w> for Spi<'d, T, M> {
+        impl<'d, M: PeriMode> embedded_hal_02::blocking::spi::Write<$w> for Spi<'d, M> {
             type Error = Error;
 
             fn write(&mut self, words: &[$w]) -> Result<(), Self::Error> {
@@ -949,7 +967,7 @@ macro_rules! impl_blocking {
             }
         }
 
-        impl<'d, T: Instance, M: PeriMode> embedded_hal_02::blocking::spi::Transfer<$w> for Spi<'d, T, M> {
+        impl<'d, M: PeriMode> embedded_hal_02::blocking::spi::Transfer<$w> for Spi<'d, M> {
             type Error = Error;
 
             fn transfer<'w>(&mut self, words: &'w mut [$w]) -> Result<&'w [$w], Self::Error> {
@@ -963,11 +981,11 @@ macro_rules! impl_blocking {
 impl_blocking!(u8);
 impl_blocking!(u16);
 
-impl<'d, T: Instance, M: PeriMode> embedded_hal_1::spi::ErrorType for Spi<'d, T, M> {
+impl<'d, M: PeriMode> embedded_hal_1::spi::ErrorType for Spi<'d, M> {
     type Error = Error;
 }
 
-impl<'d, T: Instance, W: Word, M: PeriMode> embedded_hal_1::spi::SpiBus<W> for Spi<'d, T, M> {
+impl<'d, W: Word, M: PeriMode> embedded_hal_1::spi::SpiBus<W> for Spi<'d, M> {
     fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -1000,7 +1018,7 @@ impl embedded_hal_1::spi::Error for Error {
     }
 }
 
-impl<'d, T: Instance, W: Word> embedded_hal_async::spi::SpiBus<W> for Spi<'d, T, Async> {
+impl<'d, W: Word> embedded_hal_async::spi::SpiBus<W> for Spi<'d, Async> {
     async fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -1022,8 +1040,15 @@ impl<'d, T: Instance, W: Word> embedded_hal_async::spi::SpiBus<W> for Spi<'d, T,
     }
 }
 
-pub(crate) trait SealedInstance {
-    const REGS: Regs;
+/// Type-erased info about a concrete SPI instance.
+struct Vtable {
+    regs: Regs,
+    frequency_fn: fn() -> Hertz,
+    disable_fn: fn(),
+}
+
+trait SealedInstance {
+    fn vtable() -> &'static Vtable;
 }
 
 trait SealedWord {
@@ -1128,14 +1153,21 @@ dma_trait!(TxDma, Instance);
 foreach_peripheral!(
     (spi, $inst:ident) => {
         impl SealedInstance for peripherals::$inst {
-            const REGS: Regs = crate::pac::$inst;
+            fn vtable() -> &'static Vtable {
+                static VTABLE: Vtable = Vtable {
+                    regs: crate::pac::$inst,
+                    frequency_fn: <peripherals::$inst as SealedRccPeripheral>::frequency,
+                    disable_fn: <peripherals::$inst as SealedRccPeripheral>::disable,
+                };
+                &VTABLE
+            }
         }
 
         impl Instance for peripherals::$inst {}
     };
 );
 
-impl<'d, T: Instance, M: PeriMode> SetConfig for Spi<'d, T, M> {
+impl<'d, M: PeriMode> SetConfig for Spi<'d, M> {
     type Config = Config;
     type ConfigError = ();
     fn set_config(&mut self, config: &Self::Config) -> Result<(), ()> {
