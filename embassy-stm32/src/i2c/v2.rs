@@ -9,12 +9,11 @@ use embedded_hal_1::i2c::Operation;
 use super::*;
 use crate::pac::i2c;
 
-pub(crate) unsafe fn on_interrupt<T: Instance>() {
-    let regs = T::regs();
+pub(crate) unsafe fn on_interrupt(regs: Regs, state: &'static State) {
     let isr = regs.isr().read();
 
     if isr.tcr() || isr.tc() {
-        T::state().waker.wake();
+        state.waker.wake();
     }
     // The flag can only be cleared by writting to nbytes, we won't do that here, so disable
     // the interrupt
@@ -23,16 +22,18 @@ pub(crate) unsafe fn on_interrupt<T: Instance>() {
     });
 }
 
-impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
+impl<'d, M: Mode> I2c<'d, M> {
     pub(crate) fn init(&mut self, freq: Hertz, _config: Config) {
-        T::regs().cr1().modify(|reg| {
+        let regs = self.vtable.regs;
+
+        regs.cr1().modify(|reg| {
             reg.set_pe(false);
             reg.set_anfoff(false);
         });
 
-        let timings = Timings::new(T::frequency(), freq.into());
+        let timings = Timings::new((self.vtable.frequency_fn)(), freq.into());
 
-        T::regs().timingr().write(|reg| {
+        regs.timingr().write(|reg| {
             reg.set_presc(timings.prescale);
             reg.set_scll(timings.scll);
             reg.set_sclh(timings.sclh);
@@ -40,16 +41,17 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             reg.set_scldel(timings.scldel);
         });
 
-        T::regs().cr1().modify(|reg| {
+        regs.cr1().modify(|reg| {
             reg.set_pe(true);
         });
     }
 
     fn master_stop(&mut self) {
-        T::regs().cr2().write(|w| w.set_stop(true));
+        self.vtable.regs.cr2().write(|w| w.set_stop(true));
     }
 
     fn master_read(
+        regs: Regs,
         address: u8,
         length: usize,
         stop: Stop,
@@ -63,7 +65,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             // Wait for any previous address sequence to end
             // automatically. This could be up to 50% of a bus
             // cycle (ie. up to 0.5/freq)
-            while T::regs().cr2().read().start() {
+            while regs.cr2().read().start() {
                 timeout.check()?;
             }
         }
@@ -78,7 +80,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             i2c::vals::Reload::COMPLETED
         };
 
-        T::regs().cr2().modify(|w| {
+        regs.cr2().modify(|w| {
             w.set_sadd((address << 1 | 0) as u16);
             w.set_add10(i2c::vals::Addmode::BIT7);
             w.set_dir(i2c::vals::Dir::READ);
@@ -91,13 +93,20 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         Ok(())
     }
 
-    fn master_write(address: u8, length: usize, stop: Stop, reload: bool, timeout: Timeout) -> Result<(), Error> {
+    fn master_write(
+        regs: Regs,
+        address: u8,
+        length: usize,
+        stop: Stop,
+        reload: bool,
+        timeout: Timeout,
+    ) -> Result<(), Error> {
         assert!(length < 256);
 
         // Wait for any previous address sequence to end
         // automatically. This could be up to 50% of a bus
         // cycle (ie. up to 0.5/freq)
-        while T::regs().cr2().read().start() {
+        while regs.cr2().read().start() {
             timeout.check()?;
         }
 
@@ -110,7 +119,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         // Set START and prepare to send `bytes`. The
         // START bit can be set even if the bus is BUSY or
         // I2C is in slave mode.
-        T::regs().cr2().modify(|w| {
+        regs.cr2().modify(|w| {
             w.set_sadd((address << 1 | 0) as u16);
             w.set_add10(i2c::vals::Addmode::BIT7);
             w.set_dir(i2c::vals::Dir::WRITE);
@@ -123,10 +132,10 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         Ok(())
     }
 
-    fn master_continue(length: usize, reload: bool, timeout: Timeout) -> Result<(), Error> {
+    fn master_continue(regs: Regs, length: usize, reload: bool, timeout: Timeout) -> Result<(), Error> {
         assert!(length < 256 && length > 0);
 
-        while !T::regs().isr().read().tcr() {
+        while !regs.isr().read().tcr() {
             timeout.check()?;
         }
 
@@ -136,7 +145,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             i2c::vals::Reload::COMPLETED
         };
 
-        T::regs().cr2().modify(|w| {
+        regs.cr2().modify(|w| {
             w.set_nbytes(length as u8);
             w.set_reload(reload);
         });
@@ -144,28 +153,30 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         Ok(())
     }
 
-    fn flush_txdr(&self) {
-        if T::regs().isr().read().txis() {
-            T::regs().txdr().write(|w| w.set_txdata(0));
+    fn flush_txdr(&mut self) {
+        let regs = self.vtable.regs;
+        if regs.isr().read().txis() {
+            regs.txdr().write(|w| w.set_txdata(0));
         }
-        if !T::regs().isr().read().txe() {
-            T::regs().isr().modify(|w| w.set_txe(true))
+        if !regs.isr().read().txe() {
+            regs.isr().modify(|w| w.set_txe(true))
         }
     }
 
-    fn wait_txe(&self, timeout: Timeout) -> Result<(), Error> {
+    fn wait_txe(&mut self, timeout: Timeout) -> Result<(), Error> {
+        let regs = self.vtable.regs;
         loop {
-            let isr = T::regs().isr().read();
+            let isr = regs.isr().read();
             if isr.txe() {
                 return Ok(());
             } else if isr.berr() {
-                T::regs().icr().write(|reg| reg.set_berrcf(true));
+                regs.icr().write(|reg| reg.set_berrcf(true));
                 return Err(Error::Bus);
             } else if isr.arlo() {
-                T::regs().icr().write(|reg| reg.set_arlocf(true));
+                regs.icr().write(|reg| reg.set_arlocf(true));
                 return Err(Error::Arbitration);
             } else if isr.nackf() {
-                T::regs().icr().write(|reg| reg.set_nackcf(true));
+                regs.icr().write(|reg| reg.set_nackcf(true));
                 self.flush_txdr();
                 return Err(Error::Nack);
             }
@@ -174,19 +185,20 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         }
     }
 
-    fn wait_rxne(&self, timeout: Timeout) -> Result<(), Error> {
+    fn wait_rxne(&mut self, timeout: Timeout) -> Result<(), Error> {
+        let regs = self.vtable.regs;
         loop {
-            let isr = T::regs().isr().read();
+            let isr = regs.isr().read();
             if isr.rxne() {
                 return Ok(());
             } else if isr.berr() {
-                T::regs().icr().write(|reg| reg.set_berrcf(true));
+                regs.icr().write(|reg| reg.set_berrcf(true));
                 return Err(Error::Bus);
             } else if isr.arlo() {
-                T::regs().icr().write(|reg| reg.set_arlocf(true));
+                regs.icr().write(|reg| reg.set_arlocf(true));
                 return Err(Error::Arbitration);
             } else if isr.nackf() {
-                T::regs().icr().write(|reg| reg.set_nackcf(true));
+                regs.icr().write(|reg| reg.set_nackcf(true));
                 self.flush_txdr();
                 return Err(Error::Nack);
             }
@@ -195,19 +207,20 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
         }
     }
 
-    fn wait_tc(&self, timeout: Timeout) -> Result<(), Error> {
+    fn wait_tc(&mut self, timeout: Timeout) -> Result<(), Error> {
+        let regs = self.vtable.regs;
         loop {
-            let isr = T::regs().isr().read();
+            let isr = regs.isr().read();
             if isr.tc() {
                 return Ok(());
             } else if isr.berr() {
-                T::regs().icr().write(|reg| reg.set_berrcf(true));
+                regs.icr().write(|reg| reg.set_berrcf(true));
                 return Err(Error::Bus);
             } else if isr.arlo() {
-                T::regs().icr().write(|reg| reg.set_arlocf(true));
+                regs.icr().write(|reg| reg.set_arlocf(true));
                 return Err(Error::Arbitration);
             } else if isr.nackf() {
-                T::regs().icr().write(|reg| reg.set_nackcf(true));
+                regs.icr().write(|reg| reg.set_nackcf(true));
                 self.flush_txdr();
                 return Err(Error::Nack);
             }
@@ -224,8 +237,10 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             completed_chunks + 1
         };
         let last_chunk_idx = total_chunks.saturating_sub(1);
+        let regs = self.vtable.regs;
 
         Self::master_read(
+            regs,
             address,
             read.len().min(255),
             Stop::Automatic,
@@ -236,14 +251,14 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
         for (number, chunk) in read.chunks_mut(255).enumerate() {
             if number != 0 {
-                Self::master_continue(chunk.len(), number != last_chunk_idx, timeout)?;
+                Self::master_continue(regs, chunk.len(), number != last_chunk_idx, timeout)?;
             }
 
             for byte in chunk {
                 // Wait until we have received something
                 self.wait_rxne(timeout)?;
 
-                *byte = T::regs().rxdr().read().rxdata();
+                *byte = regs.rxdr().read().rxdata();
             }
         }
         Ok(())
@@ -257,11 +272,13 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             completed_chunks + 1
         };
         let last_chunk_idx = total_chunks.saturating_sub(1);
+        let regs = self.vtable.regs;
 
         // I2C start
         //
         // ST SAD+W
         if let Err(err) = Self::master_write(
+            regs,
             address,
             write.len().min(255),
             Stop::Software,
@@ -276,7 +293,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
         for (number, chunk) in write.chunks(255).enumerate() {
             if number != 0 {
-                Self::master_continue(chunk.len(), number != last_chunk_idx, timeout)?;
+                Self::master_continue(regs, chunk.len(), number != last_chunk_idx, timeout)?;
             }
 
             for byte in chunk {
@@ -290,7 +307,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
                     return Err(err);
                 }
 
-                T::regs().txdr().write(|w| w.set_txdata(*byte));
+                regs.txdr().write(|w| w.set_txdata(*byte));
             }
         }
         // Wait until the write finishes
@@ -342,12 +359,14 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             return Err(Error::ZeroLengthTransfer);
         }
 
+        let regs = self.vtable.regs;
         let timeout = self.timeout();
 
         let first_length = write[0].len();
         let last_slice_index = write.len() - 1;
 
         if let Err(err) = Self::master_write(
+            regs,
             address,
             first_length.min(255),
             Stop::Software,
@@ -370,6 +389,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
             if idx != 0 {
                 if let Err(err) = Self::master_continue(
+                    regs,
                     slice_len.min(255),
                     (idx != last_slice_index) || (slice_len > 255),
                     timeout,
@@ -382,6 +402,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
             for (number, chunk) in slice.chunks(255).enumerate() {
                 if number != 0 {
                     if let Err(err) = Self::master_continue(
+                        regs,
                         chunk.len(),
                         (number != last_chunk_idx) || (idx != last_slice_index),
                         timeout,
@@ -402,7 +423,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
 
                     // Put byte on the wire
                     //self.i2c.txdr.write(|w| w.txdata().bits(*byte));
-                    T::regs().txdr().write(|w| w.set_txdata(*byte));
+                    regs.txdr().write(|w| w.set_txdata(*byte));
                 }
             }
         }
@@ -413,7 +434,7 @@ impl<'d, T: Instance, M: Mode> I2c<'d, T, M> {
     }
 }
 
-impl<'d, T: Instance> I2c<'d, T, Async> {
+impl<'d> I2c<'d, Async> {
     async fn write_dma_internal(
         &mut self,
         address: u8,
@@ -423,9 +444,10 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
         timeout: Timeout,
     ) -> Result<(), Error> {
         let total_len = write.len();
+        let regs = self.vtable.regs;
 
         let dma_transfer = unsafe {
-            let regs = T::regs();
+            let regs = regs;
             regs.cr1().modify(|w| {
                 w.set_txdmaen(true);
                 if first_slice {
@@ -437,11 +459,11 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
             self.tx_dma.as_mut().unwrap().write(write, dst, Default::default())
         };
 
-        let state = T::state();
+        let state = self.state;
         let mut remaining_len = total_len;
 
         let on_drop = OnDrop::new(|| {
-            let regs = T::regs();
+            let regs = regs;
             regs.cr1().modify(|w| {
                 if last_slice {
                     w.set_txdmaen(false);
@@ -453,10 +475,11 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
         poll_fn(|cx| {
             state.waker.register(cx.waker());
 
-            let isr = T::regs().isr().read();
+            let isr = regs.isr().read();
             if remaining_len == total_len {
                 if first_slice {
                     Self::master_write(
+                        regs,
                         address,
                         total_len.min(255),
                         Stop::Software,
@@ -464,8 +487,8 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
                         timeout,
                     )?;
                 } else {
-                    Self::master_continue(total_len.min(255), (total_len > 255) || !last_slice, timeout)?;
-                    T::regs().cr1().modify(|w| w.set_tcie(true));
+                    Self::master_continue(regs, total_len.min(255), (total_len > 255) || !last_slice, timeout)?;
+                    regs.cr1().modify(|w| w.set_tcie(true));
                 }
             } else if !(isr.tcr() || isr.tc()) {
                 // poll_fn was woken without an interrupt present
@@ -475,10 +498,10 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
             } else {
                 let last_piece = (remaining_len <= 255) && last_slice;
 
-                if let Err(e) = Self::master_continue(remaining_len.min(255), !last_piece, timeout) {
+                if let Err(e) = Self::master_continue(regs, remaining_len.min(255), !last_piece, timeout) {
                     return Poll::Ready(Err(e));
                 }
-                T::regs().cr1().modify(|w| w.set_tcie(true));
+                regs.cr1().modify(|w| w.set_tcie(true));
             }
 
             remaining_len = remaining_len.saturating_sub(255);
@@ -507,23 +530,23 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
         timeout: Timeout,
     ) -> Result<(), Error> {
         let total_len = buffer.len();
+        let regs = self.vtable.regs;
+        let rx_dma = self.rx_dma.as_mut();
 
         let dma_transfer = unsafe {
-            let regs = T::regs();
             regs.cr1().modify(|w| {
                 w.set_rxdmaen(true);
                 w.set_tcie(true);
             });
             let src = regs.rxdr().as_ptr() as *mut u8;
 
-            self.rx_dma.as_mut().unwrap().read(src, buffer, Default::default())
+            rx_dma.unwrap().read(src, buffer, Default::default())
         };
 
-        let state = T::state();
+        let state = self.state;
         let mut remaining_len = total_len;
 
         let on_drop = OnDrop::new(|| {
-            let regs = T::regs();
             regs.cr1().modify(|w| {
                 w.set_rxdmaen(false);
                 w.set_tcie(false);
@@ -533,9 +556,10 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
         poll_fn(|cx| {
             state.waker.register(cx.waker());
 
-            let isr = T::regs().isr().read();
+            let isr = regs.isr().read();
             if remaining_len == total_len {
                 Self::master_read(
+                    regs,
                     address,
                     total_len.min(255),
                     Stop::Software,
@@ -551,10 +575,10 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
             } else {
                 let last_piece = remaining_len <= 255;
 
-                if let Err(e) = Self::master_continue(remaining_len.min(255), !last_piece, timeout) {
+                if let Err(e) = Self::master_continue(regs, remaining_len.min(255), !last_piece, timeout) {
                     return Poll::Ready(Err(e));
                 }
-                T::regs().cr1().modify(|w| w.set_tcie(true));
+                regs.cr1().modify(|w| w.set_tcie(true));
             }
 
             remaining_len = remaining_len.saturating_sub(255);
@@ -658,9 +682,9 @@ impl<'d, T: Instance> I2c<'d, T, Async> {
     }
 }
 
-impl<'d, T: Instance, M: Mode> Drop for I2c<'d, T, M> {
+impl<'d, M: Mode> Drop for I2c<'d, M> {
     fn drop(&mut self) {
-        T::disable();
+        (self.vtable.disable_fn)();
     }
 }
 
@@ -788,19 +812,18 @@ impl Timings {
     }
 }
 
-impl<'d, T: Instance, M: Mode> SetConfig for I2c<'d, T, M> {
+impl<'d, M: Mode> SetConfig for I2c<'d, M> {
     type Config = Hertz;
     type ConfigError = ();
     fn set_config(&mut self, config: &Self::Config) -> Result<(), ()> {
-        let timings = Timings::new(T::frequency(), *config);
-        T::regs().timingr().write(|reg| {
+        let timings = Timings::new((self.vtable.frequency_fn)(), *config);
+        self.vtable.regs.timingr().write(|reg| {
             reg.set_presc(timings.prescale);
             reg.set_scll(timings.scll);
             reg.set_sclh(timings.sclh);
             reg.set_sdadel(timings.sdadel);
             reg.set_scldel(timings.scldel);
         });
-
         Ok(())
     }
 }
