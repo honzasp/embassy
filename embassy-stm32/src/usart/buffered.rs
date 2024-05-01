@@ -26,7 +26,7 @@ pub struct InterruptHandler<T: BasicInstance> {
 
 impl<T: BasicInstance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
     unsafe fn on_interrupt() {
-        on_interrupt(T::info().regs, T::buffered_state())
+        on_interrupt(T::vtable().regs, T::buffered_state())
     }
 }
 
@@ -150,7 +150,7 @@ pub struct BufferedUart<'d> {
 ///
 /// Created with [BufferedUart::split]
 pub struct BufferedUartTx<'d> {
-    info: &'static Info,
+    vtable: &'static Vtable,
     state: &'static State,
     _phantom: PhantomData<&'d mut ()>,
 }
@@ -159,7 +159,7 @@ pub struct BufferedUartTx<'d> {
 ///
 /// Created with [BufferedUart::split]
 pub struct BufferedUartRx<'d> {
-    info: &'static Info,
+    vtable: &'static Vtable,
     state: &'static State,
     _phantom: PhantomData<&'d mut ()>,
 }
@@ -229,7 +229,7 @@ impl<'d> BufferedUart<'d> {
 
         rts.set_as_af(rts.af_num(), AFType::OutputPushPull);
         cts.set_as_af(cts.af_num(), AFType::Input);
-        T::info().regs.cr3().write(|w| {
+        T::vtable().regs.cr3().write(|w| {
             w.set_rtse(true);
             w.set_ctse(true);
         });
@@ -256,7 +256,7 @@ impl<'d> BufferedUart<'d> {
         T::enable_and_reset();
 
         de.set_as_af(de.af_num(), AFType::OutputPushPull);
-        T::info().regs.cr3().write(|w| {
+        T::vtable().regs.cr3().write(|w| {
             w.set_dem(true);
         });
 
@@ -273,18 +273,18 @@ impl<'d> BufferedUart<'d> {
     ) -> Result<Self, ConfigError> {
         into_ref!(_peri, rx, tx);
 
-        let info = T::info();
+        let vtable = T::vtable();
         let state = T::buffered_state();
         let len = tx_buffer.len();
         unsafe { state.tx_buf.init(tx_buffer.as_mut_ptr(), len) };
         let len = rx_buffer.len();
         unsafe { state.rx_buf.init(rx_buffer.as_mut_ptr(), len) };
 
-        let r = info.regs;
+        let r = vtable.regs;
         rx.set_as_af(rx.af_num(), AFType::Input);
         tx.set_as_af(tx.af_num(), AFType::OutputPushPull);
 
-        configure(info, &config, true, true)?;
+        configure(vtable, &config, true, true)?;
 
         r.cr1().modify(|w| {
             w.set_rxneie(true);
@@ -296,12 +296,12 @@ impl<'d> BufferedUart<'d> {
 
         Ok(Self {
             rx: BufferedUartRx {
-                info,
+                vtable,
                 state,
                 _phantom: PhantomData,
             },
             tx: BufferedUartTx {
-                info,
+                vtable,
                 state,
                 _phantom: PhantomData,
             },
@@ -315,9 +315,9 @@ impl<'d> BufferedUart<'d> {
 
     /// Reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.rx.info, config)?;
+        reconfigure(self.rx.vtable, config)?;
 
-        self.rx.info.regs.cr1().modify(|w| {
+        self.rx.vtable.regs.cr1().modify(|w| {
             w.set_rxneie(true);
             w.set_idleie(true);
         });
@@ -341,7 +341,7 @@ impl<'d> BufferedUartRx<'d> {
                 rx_reader.pop_done(len);
 
                 if do_pend {
-                    (self.info.interrupt_pend_fn)();
+                    (self.vtable.interrupt_pend_fn)();
                 }
 
                 return Poll::Ready(Ok(len));
@@ -367,7 +367,7 @@ impl<'d> BufferedUartRx<'d> {
                 rx_reader.pop_done(len);
 
                 if do_pend {
-                    (self.info.interrupt_pend_fn)();
+                    (self.vtable.interrupt_pend_fn)();
                 }
 
                 return Ok(len);
@@ -397,15 +397,15 @@ impl<'d> BufferedUartRx<'d> {
         let full = state.rx_buf.is_full();
         rx_reader.pop_done(amt);
         if full {
-            (self.info.interrupt_pend_fn)();
+            (self.vtable.interrupt_pend_fn)();
         }
     }
 
     /// Reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, config)?;
+        reconfigure(self.vtable, config)?;
 
-        self.info.regs.cr1().modify(|w| {
+        self.vtable.regs.cr1().modify(|w| {
             w.set_rxneie(true);
             w.set_idleie(true);
         });
@@ -434,7 +434,7 @@ impl<'d> BufferedUartTx<'d> {
             tx_writer.push_done(n);
 
             if empty {
-                (self.info.interrupt_pend_fn)();
+                (self.vtable.interrupt_pend_fn)();
             }
 
             Poll::Ready(Ok(n))
@@ -469,7 +469,7 @@ impl<'d> BufferedUartTx<'d> {
                 tx_writer.push_done(n);
 
                 if empty {
-                    (self.info.interrupt_pend_fn)();
+                    (self.vtable.interrupt_pend_fn)();
                 }
 
                 return Ok(n);
@@ -488,9 +488,9 @@ impl<'d> BufferedUartTx<'d> {
 
     /// Reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, config)?;
+        reconfigure(self.vtable, config)?;
 
-        self.info.regs.cr1().modify(|w| {
+        self.vtable.regs.cr1().modify(|w| {
             w.set_rxneie(true);
             w.set_idleie(true);
         });
@@ -508,11 +508,11 @@ impl<'d> Drop for BufferedUartRx<'d> {
             // TX is inactive if the the buffer is not available.
             // We can now unregister the interrupt handler
             if state.tx_buf.len() == 0 {
-                (self.info.interrupt_disable_fn)();
+                (self.vtable.interrupt_disable_fn)();
             }
         }
 
-        (self.info.disable_fn)();
+        (self.vtable.disable_fn)();
     }
 }
 
@@ -525,11 +525,11 @@ impl<'d> Drop for BufferedUartTx<'d> {
             // RX is inactive if the the buffer is not available.
             // We can now unregister the interrupt handler
             if state.rx_buf.len() == 0 {
-                (self.info.interrupt_disable_fn)();
+                (self.vtable.interrupt_disable_fn)();
             }
         }
 
-        (self.info.disable_fn)();
+        (self.vtable.disable_fn)();
     }
 }
 
@@ -633,7 +633,7 @@ impl<'d> embedded_hal_02::serial::Read<u8> for BufferedUartRx<'d> {
     type Error = Error;
 
     fn read(&mut self) -> Result<u8, nb::Error<Self::Error>> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         unsafe {
             let sr = sr(r).read();
             if sr.pe() {

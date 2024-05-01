@@ -37,7 +37,7 @@ pub struct InterruptHandler<T: BasicInstance> {
 
 impl<T: BasicInstance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandler<T> {
     unsafe fn on_interrupt() {
-        on_interrupt(T::info().regs, T::state())
+        on_interrupt(T::vtable().regs, T::state())
     }
 }
 
@@ -260,7 +260,7 @@ impl<'d, M: Mode> SetConfig for Uart<'d, M> {
 /// Can be obtained from [`Uart::split`], or can be constructed independently,
 /// if you do not need the receiving half of the driver.
 pub struct UartTx<'d, M: Mode> {
-    info: &'static Info,
+    vtable: &'static Vtable,
     tx: Option<PeripheralRef<'d, AnyPin>>,
     cts: Option<PeripheralRef<'d, AnyPin>>,
     de: Option<PeripheralRef<'d, AnyPin>>,
@@ -307,7 +307,7 @@ impl<'d, M: Mode> SetConfig for UartTx<'d, M> {
 ///
 /// Also see [this github comment](https://github.com/embassy-rs/embassy/pull/2185#issuecomment-1810047043).
 pub struct UartRx<'d, M: Mode> {
-    info: &'static Info,
+    vtable: &'static Vtable,
     state: &'static State,
     rx: Option<PeripheralRef<'d, AnyPin>>,
     rts: Option<PeripheralRef<'d, AnyPin>>,
@@ -364,12 +364,12 @@ impl<'d> UartTx<'d, Async> {
     /// Initiate an asynchronous UART write
     pub async fn write(&mut self, buffer: &[u8]) -> Result<(), Error> {
         let ch = self.tx_dma.as_mut().unwrap();
-        self.info.regs.cr3().modify(|reg| {
+        self.vtable.regs.cr3().modify(|reg| {
             reg.set_dmat(true);
         });
         // If we don't assign future to a variable, the data register pointer
         // is held across an await and makes the future non-Send.
-        let transfer = unsafe { ch.write(buffer, tdr(self.info.regs), Default::default()) };
+        let transfer = unsafe { ch.write(buffer, tdr(self.vtable.regs), Default::default()) };
         transfer.await;
         Ok(())
     }
@@ -414,15 +414,15 @@ impl<'d, M: Mode> UartTx<'d, M> {
     ) -> Result<Self, ConfigError> {
         T::enable_and_reset();
 
-        let info = T::info();
-        let r = info.regs;
+        let vtable = T::vtable();
+        let r = vtable.regs;
         r.cr3().modify(|w| {
             w.set_ctse(cts.is_some());
         });
-        configure(info, &config, false, true)?;
+        configure(vtable, &config, false, true)?;
 
         Ok(Self {
-            info,
+            vtable,
             tx,
             cts,
             de: None,
@@ -433,12 +433,12 @@ impl<'d, M: Mode> UartTx<'d, M> {
 
     /// Reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, config)
+        reconfigure(self.vtable, config)
     }
 
     /// Perform a blocking UART write
     pub fn blocking_write(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         for &b in buffer {
             while !sr(r).read().txe() {}
             unsafe { tdr(r).write_volatile(b) };
@@ -448,7 +448,7 @@ impl<'d, M: Mode> UartTx<'d, M> {
 
     /// Block until transmission complete
     pub fn blocking_flush(&mut self) -> Result<(), Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         while !sr(r).read().tc() {}
         Ok(())
     }
@@ -503,7 +503,7 @@ impl<'d> UartRx<'d, Async> {
         buffer: &mut [u8],
         enable_idle_line_detection: bool,
     ) -> Result<ReadCompletionEvent, Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
 
         // make sure USART state is restored to neutral state when this future is dropped
         let on_drop = OnDrop::new(move || {
@@ -733,20 +733,20 @@ impl<'d, M: Mode> UartRx<'d, M> {
     ) -> Result<Self, ConfigError> {
         T::enable_and_reset();
 
-        let info = T::info();
+        let vtable = T::vtable();
         let state = T::state();
-        let r = info.regs;
+        let r = vtable.regs;
         r.cr3().write(|w| {
             w.set_rtse(rts.is_some());
         });
-        configure(info, &config, true, false)?;
+        configure(vtable, &config, true, false)?;
 
         T::Interrupt::unpend();
         unsafe { T::Interrupt::enable() };
 
         Ok(Self {
             _phantom: PhantomData,
-            info,
+            vtable,
             state,
             rx,
             rts,
@@ -759,12 +759,12 @@ impl<'d, M: Mode> UartRx<'d, M> {
 
     /// Reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
-        reconfigure(self.info, config)
+        reconfigure(self.vtable, config)
     }
 
     #[cfg(any(usart_v1, usart_v2))]
     fn check_rx_flags(&mut self) -> Result<bool, Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         loop {
             // Handle all buffered error flags.
             if self.buffered_sr.pe() {
@@ -797,7 +797,7 @@ impl<'d, M: Mode> UartRx<'d, M> {
 
     #[cfg(any(usart_v3, usart_v4))]
     fn check_rx_flags(&mut self) -> Result<bool, Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         let sr = r.isr().read();
         if sr.pe() {
             r.icr().write(|w| w.set_pe(true));
@@ -817,7 +817,7 @@ impl<'d, M: Mode> UartRx<'d, M> {
 
     /// Read a single u8 if there is one available, otherwise return WouldBlock
     pub(crate) fn nb_read(&mut self) -> Result<u8, nb::Error<Error>> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         if self.check_rx_flags()? {
             Ok(unsafe { rdr(r).read_volatile() })
         } else {
@@ -827,7 +827,7 @@ impl<'d, M: Mode> UartRx<'d, M> {
 
     /// Perform a blocking read into `buffer`
     pub fn blocking_read(&mut self, buffer: &mut [u8]) -> Result<(), Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         for b in buffer {
             while !self.check_rx_flags()? {}
             unsafe { *b = rdr(r).read_volatile() }
@@ -841,7 +841,7 @@ impl<'d, M: Mode> Drop for UartTx<'d, M> {
         self.tx.as_ref().map(|x| x.set_as_disconnected());
         self.cts.as_ref().map(|x| x.set_as_disconnected());
         self.de.as_ref().map(|x| x.set_as_disconnected());
-        (self.info.disable_fn)();
+        (self.vtable.disable_fn)();
     }
 }
 
@@ -849,7 +849,7 @@ impl<'d, M: Mode> Drop for UartRx<'d, M> {
     fn drop(&mut self) {
         self.rx.as_ref().map(|x| x.set_as_disconnected());
         self.rts.as_ref().map(|x| x.set_as_disconnected());
-        (self.info.disable_fn)()
+        (self.vtable.disable_fn)()
     }
 }
 
@@ -1165,9 +1165,9 @@ impl<'d, M: Mode> Uart<'d, M> {
         T::enable_and_reset();
         T::enable_and_reset();
 
-        let info = T::info();
+        let vtable = T::vtable();
         let state = T::state();
-        let r = info.regs;
+        let r = vtable.regs;
 
         r.cr3().write(|w| {
             w.set_rtse(rts.is_some());
@@ -1175,7 +1175,7 @@ impl<'d, M: Mode> Uart<'d, M> {
             #[cfg(not(any(usart_v1, usart_v2)))]
             w.set_dem(de.is_some());
         });
-        configure(info, &config, true, true)?;
+        configure(vtable, &config, true, true)?;
 
         T::Interrupt::unpend();
         unsafe { T::Interrupt::enable() };
@@ -1183,7 +1183,7 @@ impl<'d, M: Mode> Uart<'d, M> {
         Ok(Self {
             tx: UartTx {
                 _phantom: PhantomData,
-                info,
+                vtable,
                 tx,
                 cts,
                 de,
@@ -1191,7 +1191,7 @@ impl<'d, M: Mode> Uart<'d, M> {
             },
             rx: UartRx {
                 _phantom: PhantomData,
-                info,
+                vtable,
                 state,
                 rx,
                 rts,
@@ -1231,23 +1231,23 @@ impl<'d, M: Mode> Uart<'d, M> {
     }
 }
 
-fn reconfigure(info: &Info, config: &Config) -> Result<(), ConfigError> {
-    (info.interrupt_disable_fn)();
-    let r = info.regs;
+fn reconfigure(vtable: &Vtable, config: &Config) -> Result<(), ConfigError> {
+    (vtable.interrupt_disable_fn)();
+    let r = vtable.regs;
 
     let cr = r.cr1().read();
-    configure(info, config, cr.re(), cr.te())?;
+    configure(vtable, config, cr.re(), cr.te())?;
 
-    (info.interrupt_unpend_fn)();
-    unsafe { (info.interrupt_enable_fn)() };
+    (vtable.interrupt_unpend_fn)();
+    unsafe { (vtable.interrupt_enable_fn)() };
 
     Ok(())
 }
 
-fn configure(info: &Info, config: &Config, enable_rx: bool, enable_tx: bool) -> Result<(), ConfigError> {
-    let r = info.regs;
-    let pclk_freq = (info.frequency_fn)();
-    let kind = info.kind;
+fn configure(vtable: &Vtable, config: &Config, enable_rx: bool, enable_tx: bool) -> Result<(), ConfigError> {
+    let r = vtable.regs;
+    let pclk_freq = (vtable.frequency_fn)();
+    let kind = vtable.kind;
 
     if !enable_rx && !enable_tx {
         return Err(ConfigError::RxOrTxNotEnabled);
@@ -1642,7 +1642,7 @@ impl State {
 ///
 /// Note that this does not include [`State`] and [`buffered::State`], so if we don't use the
 /// `buffered` API, `buffered::State` will not have to be kept in memory.
-struct Info {
+struct Vtable {
     regs: Regs,
     kind: Kind,
     frequency_fn: fn() -> Hertz,
@@ -1654,7 +1654,7 @@ struct Info {
 }
 
 trait SealedBasicInstance: crate::rcc::RccPeripheral {
-    fn info() -> &'static Info;
+    fn vtable() -> &'static Vtable;
     fn state() -> &'static State;
     fn buffered_state() -> &'static buffered::State;
 }
@@ -1688,8 +1688,8 @@ dma_trait!(RxDma, BasicInstance);
 macro_rules! impl_usart {
     ($inst:ident, $irq:ident, $kind:expr) => {
         impl SealedBasicInstance for crate::peripherals::$inst {
-            fn info() -> &'static Info {
-                static INFO: Info = Info {
+            fn vtable() -> &'static Vtable {
+                static VTABLE: Vtable = Vtable {
                     regs: unsafe { Regs::from_ptr(crate::pac::$inst.as_ptr()) },
                     kind: $kind,
                     frequency_fn: <crate::peripherals::$inst as crate::rcc::SealedRccPeripheral>::frequency,
@@ -1699,7 +1699,7 @@ macro_rules! impl_usart {
                     interrupt_pend_fn: crate::interrupt::typelevel::$irq::pend,
                     interrupt_unpend_fn: crate::interrupt::typelevel::$irq::unpend,
                 };
-                &INFO
+                &VTABLE
             }
 
             fn state() -> &'static State {

@@ -6,7 +6,7 @@ use core::task::Poll;
 use embassy_embedded_hal::SetConfig;
 use futures_util::future::{select, Either};
 
-use super::{clear_interrupt_flags, rdr, reconfigure, sr, Config, ConfigError, Error, Info, State, UartRx};
+use super::{clear_interrupt_flags, rdr, reconfigure, sr, Config, ConfigError, Error, State, UartRx, Vtable};
 use crate::dma::ReadableRingBuffer;
 use crate::mode::Async;
 use crate::usart::{Regs, Sr};
@@ -15,7 +15,7 @@ use crate::usart::{Regs, Sr};
 ///
 /// Created with [UartRx::into_ring_buffered]
 pub struct RingBufferedUartRx<'d> {
-    info: &'static Info,
+    vtable: &'static Vtable,
     state: &'static State,
     ring_buf: ReadableRingBuffer<'d, u8>,
 }
@@ -43,14 +43,18 @@ impl<'d> UartRx<'d, Async> {
         let request = rx_dma.request;
         let rx_dma = unsafe { rx_dma.channel.clone_unchecked() };
 
-        let info = self.info;
+        let vtable = self.vtable;
         let state = self.state;
-        let ring_buf = unsafe { ReadableRingBuffer::new(rx_dma, request, rdr(info.regs), dma_buf, opts) };
+        let ring_buf = unsafe { ReadableRingBuffer::new(rx_dma, request, rdr(vtable.regs), dma_buf, opts) };
 
         // Don't disable the clock
         mem::forget(self);
 
-        RingBufferedUartRx { info, state, ring_buf }
+        RingBufferedUartRx {
+            vtable,
+            state,
+            ring_buf,
+        }
     }
 }
 
@@ -74,7 +78,7 @@ impl<'d> RingBufferedUartRx<'d> {
     /// Cleanly stop and reconfigure the driver
     pub fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
         self.teardown_uart();
-        reconfigure(self.info, config)
+        reconfigure(self.vtable, config)
     }
 
     /// Start uart background receive
@@ -85,7 +89,7 @@ impl<'d> RingBufferedUartRx<'d> {
         // start the dma controller
         self.ring_buf.start();
 
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         // clear all interrupts and DMA Rx Request
         r.cr1().modify(|w| {
             // disable RXNE interrupt
@@ -107,7 +111,7 @@ impl<'d> RingBufferedUartRx<'d> {
     fn teardown_uart(&mut self) {
         self.ring_buf.request_stop();
 
-        let r = self.info.regs;
+        let r = self.vtable.regs;
         // clear all interrupts and DMA Rx Request
         r.cr1().modify(|w| {
             // disable RXNE interrupt
@@ -136,7 +140,7 @@ impl<'d> RingBufferedUartRx<'d> {
     /// Receive in the background is terminated if an error is returned.
     /// It must then manually be started again by calling `start()` or by re-calling `read()`.
     pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
-        let r = self.info.regs;
+        let r = self.vtable.regs;
 
         // Start background receive if it was not already started
         if !r.cr3().read().dmar() {
@@ -192,7 +196,7 @@ impl<'d> RingBufferedUartRx<'d> {
 
             // Critical section is needed so that IDLE isn't set after
             // our read but before we clear it.
-            let sr = critical_section::with(|_| clear_idle_flag(self.info.regs));
+            let sr = critical_section::with(|_| clear_idle_flag(self.vtable.regs));
 
             check_for_errors(sr)?;
 
@@ -214,7 +218,7 @@ impl<'d> RingBufferedUartRx<'d> {
 impl Drop for RingBufferedUartRx<'_> {
     fn drop(&mut self) {
         self.teardown_uart();
-        (self.info.disable_fn)();
+        (self.vtable.disable_fn)();
     }
 }
 
