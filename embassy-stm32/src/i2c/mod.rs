@@ -15,7 +15,9 @@ use embassy_sync::waitqueue::AtomicWaker;
 use embassy_time::{Duration, Instant};
 
 use crate::dma::ChannelAndRequest;
-use crate::gpio::{AFType, Pull};
+#[cfg(gpio_v2)]
+use crate::gpio::Pull;
+use crate::gpio::{AfType, OutputType, Speed};
 use crate::interrupt::typelevel::Interrupt;
 use crate::mode::{Async, Blocking, Mode};
 use crate::rcc::{self, RccInfo, SealedRccPeripheral};
@@ -50,11 +52,13 @@ pub struct Config {
     ///
     /// Using external pullup resistors is recommended for I2C. If you do
     /// have external pullups you should not enable this.
+    #[cfg(gpio_v2)]
     pub sda_pullup: bool,
     /// Enable internal pullup on SCL.
     ///
     /// Using external pullup resistors is recommended for I2C. If you do
     /// have external pullups you should not enable this.
+    #[cfg(gpio_v2)]
     pub scl_pullup: bool,
     /// Timeout.
     #[cfg(feature = "time")]
@@ -64,7 +68,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            #[cfg(gpio_v2)]
             sda_pullup: false,
+            #[cfg(gpio_v2)]
             scl_pullup: false,
             #[cfg(feature = "time")]
             timeout: embassy_time::Duration::from_millis(1000),
@@ -130,21 +136,33 @@ impl<'d, M: Mode> I2c<'d, M> {
 
         rcc::enable_and_reset::<T>();
 
-        scl.set_as_af_pull(
+        scl.set_as_af(
             scl.af_num(),
-            AFType::OutputOpenDrain,
-            match config.scl_pullup {
-                true => Pull::Up,
-                false => Pull::None,
-            },
+            #[cfg(gpio_v1)]
+            AfType::Output(OutputType::OpenDrain, Speed::VeryHigh),
+            #[cfg(gpio_v2)]
+            AfType::OutputPull(
+                OutputType::OpenDrain,
+                Speed::VeryHigh,
+                match config.scl_pullup {
+                    true => Pull::Up,
+                    false => Pull::None,
+                },
+            ),
         );
-        sda.set_as_af_pull(
+        sda.set_as_af(
             sda.af_num(),
-            AFType::OutputOpenDrain,
-            match config.sda_pullup {
-                true => Pull::Up,
-                false => Pull::None,
-            },
+            #[cfg(gpio_v1)]
+            AfType::Output(OutputType::OpenDrain, Speed::VeryHigh),
+            #[cfg(gpio_v2)]
+            AfType::OutputPull(
+                OutputType::OpenDrain,
+                Speed::VeryHigh,
+                match config.sda_pullup {
+                    true => Pull::Up,
+                    false => Pull::None,
+                },
+            ),
         );
 
         unsafe { T::EventInterrupt::enable() };

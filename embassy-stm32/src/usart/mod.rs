@@ -14,7 +14,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 use futures_util::future::{select, Either};
 
 use crate::dma::ChannelAndRequest;
-use crate::gpio::{AFType, AnyPin, SealedPin};
+use crate::gpio::{AfType, AnyPin, OutputType, Pull, SealedPin, Speed};
 use crate::interrupt::typelevel::Interrupt as _;
 use crate::interrupt::{self, Interrupt, InterruptExt};
 use crate::mode::{Async, Blocking, Mode};
@@ -159,11 +159,11 @@ pub struct Config {
     #[cfg(any(usart_v3, usart_v4))]
     pub swap_rx_tx: bool,
 
-    /// Set this to true to invert TX pin signal values (V<sub>DD</sub> =0/mark, Gnd = 1/idle).
+    /// Set this to true to invert TX pin signal values (V<sub>DD</sub> = 0/mark, Gnd = 1/idle).
     #[cfg(any(usart_v3, usart_v4))]
     pub invert_tx: bool,
 
-    /// Set this to true to invert RX pin signal values (V<sub>DD</sub> =0/mark, Gnd = 1/idle).
+    /// Set this to true to invert RX pin signal values (V<sub>DD</sub> = 0/mark, Gnd = 1/idle).
     #[cfg(any(usart_v3, usart_v4))]
     pub invert_rx: bool,
 
@@ -172,19 +172,20 @@ pub struct Config {
 }
 
 impl Config {
-    fn tx_af(&self) -> AFType {
+    fn tx_af(&self) -> AfType {
         #[cfg(any(usart_v3, usart_v4))]
         if self.swap_rx_tx {
-            return AFType::Input;
+            return AfType::Input(Pull::None);
         };
-        AFType::OutputPushPull
+        AfType::Output(OutputType::PushPull, Speed::Medium)
     }
-    fn rx_af(&self) -> AFType {
+
+    fn rx_af(&self) -> AfType {
         #[cfg(any(usart_v3, usart_v4))]
         if self.swap_rx_tx {
-            return AFType::OutputPushPull;
+            return AfType::Output(OutputType::PushPull, Speed::Medium);
         };
-        AFType::Input
+        AfType::Input(Pull::None)
     }
 }
 
@@ -342,7 +343,7 @@ impl<'d> UartTx<'d, Async> {
     ) -> Result<Self, ConfigError> {
         Self::new_inner(
             peri,
-            new_pin!(tx, AFType::OutputPushPull),
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             new_dma!(tx_dma),
             config,
@@ -359,8 +360,8 @@ impl<'d> UartTx<'d, Async> {
     ) -> Result<Self, ConfigError> {
         Self::new_inner(
             peri,
-            new_pin!(tx, AFType::OutputPushPull),
-            new_pin!(cts, AFType::Input),
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
+            new_pin!(cts, AfType::Input(Pull::None)),
             new_dma!(tx_dma),
             config,
         )
@@ -401,7 +402,13 @@ impl<'d> UartTx<'d, Blocking> {
         tx: impl Peripheral<P = impl TxPin<T>> + 'd,
         config: Config,
     ) -> Result<Self, ConfigError> {
-        Self::new_inner(peri, new_pin!(tx, AFType::OutputPushPull), None, None, config)
+        Self::new_inner(
+            peri,
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
+            None,
+            None,
+            config,
+        )
     }
 
     /// Create a new blocking tx-only UART with a clear-to-send pin
@@ -413,8 +420,8 @@ impl<'d> UartTx<'d, Blocking> {
     ) -> Result<Self, ConfigError> {
         Self::new_inner(
             peri,
-            new_pin!(tx, AFType::OutputPushPull),
-            new_pin!(cts, AFType::Input),
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
+            new_pin!(cts, AfType::Input(Pull::None)),
             None,
             config,
         )
@@ -504,7 +511,13 @@ impl<'d> UartRx<'d, Async> {
         rx_dma: impl Peripheral<P = impl RxDma<T>> + 'd,
         config: Config,
     ) -> Result<Self, ConfigError> {
-        Self::new_inner(peri, new_pin!(rx, AFType::Input), None, new_dma!(rx_dma), config)
+        Self::new_inner(
+            peri,
+            new_pin!(rx, AfType::Input(Pull::None)),
+            None,
+            new_dma!(rx_dma),
+            config,
+        )
     }
 
     /// Create a new rx-only UART with a request-to-send pin
@@ -518,8 +531,8 @@ impl<'d> UartRx<'d, Async> {
     ) -> Result<Self, ConfigError> {
         Self::new_inner(
             peri,
-            new_pin!(rx, AFType::Input),
-            new_pin!(rts, AFType::OutputPushPull),
+            new_pin!(rx, AfType::Input(Pull::None)),
+            new_pin!(rts, AfType::Output(OutputType::PushPull, Speed::Medium)),
             new_dma!(rx_dma),
             config,
         )
@@ -747,7 +760,7 @@ impl<'d> UartRx<'d, Blocking> {
         rx: impl Peripheral<P = impl RxPin<T>> + 'd,
         config: Config,
     ) -> Result<Self, ConfigError> {
-        Self::new_inner(peri, new_pin!(rx, AFType::Input), None, None, config)
+        Self::new_inner(peri, new_pin!(rx, AfType::Input(Pull::None)), None, None, config)
     }
 
     /// Create a new rx-only UART with a request-to-send pin
@@ -759,8 +772,8 @@ impl<'d> UartRx<'d, Blocking> {
     ) -> Result<Self, ConfigError> {
         Self::new_inner(
             peri,
-            new_pin!(rx, AFType::Input),
-            new_pin!(rts, AFType::OutputPushPull),
+            new_pin!(rx, AfType::Input(Pull::None)),
+            new_pin!(rts, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             config,
         )
@@ -960,8 +973,8 @@ impl<'d> Uart<'d, Async> {
             peri,
             new_pin!(rx, config.rx_af()),
             new_pin!(tx, config.tx_af()),
-            new_pin!(rts, AFType::OutputPushPull),
-            new_pin!(cts, AFType::Input),
+            new_pin!(rts, AfType::Output(OutputType::PushPull, Speed::Medium)),
+            new_pin!(cts, AfType::Input(Pull::None)),
             None,
             new_dma!(tx_dma),
             new_dma!(rx_dma),
@@ -987,7 +1000,7 @@ impl<'d> Uart<'d, Async> {
             new_pin!(tx, config.tx_af()),
             None,
             None,
-            new_pin!(de, AFType::OutputPushPull),
+            new_pin!(de, AfType::Output(OutputType::PushPull, Speed::Medium)),
             new_dma!(tx_dma),
             new_dma!(rx_dma),
             config,
@@ -1022,7 +1035,7 @@ impl<'d> Uart<'d, Async> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(tx, AFType::OutputPushPull),
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             None,
             None,
@@ -1058,7 +1071,7 @@ impl<'d> Uart<'d, Async> {
             peri,
             None,
             None,
-            new_pin!(rx, AFType::OutputPushPull),
+            new_pin!(rx, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             None,
             new_dma!(tx_dma),
@@ -1117,8 +1130,8 @@ impl<'d> Uart<'d, Blocking> {
             peri,
             new_pin!(rx, config.rx_af()),
             new_pin!(tx, config.tx_af()),
-            new_pin!(rts, AFType::OutputPushPull),
-            new_pin!(cts, AFType::Input),
+            new_pin!(rts, AfType::Output(OutputType::PushPull, Speed::Medium)),
+            new_pin!(cts, AfType::Input(Pull::None)),
             None,
             None,
             None,
@@ -1141,7 +1154,7 @@ impl<'d> Uart<'d, Blocking> {
             new_pin!(tx, config.tx_af()),
             None,
             None,
-            new_pin!(de, AFType::OutputPushPull),
+            new_pin!(de, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             None,
             config,
@@ -1173,7 +1186,7 @@ impl<'d> Uart<'d, Blocking> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(tx, AFType::OutputPushPull),
+            new_pin!(tx, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             None,
             None,
@@ -1206,7 +1219,7 @@ impl<'d> Uart<'d, Blocking> {
             peri,
             None,
             None,
-            new_pin!(rx, AFType::OutputPushPull),
+            new_pin!(rx, AfType::Output(OutputType::PushPull, Speed::Medium)),
             None,
             None,
             None,

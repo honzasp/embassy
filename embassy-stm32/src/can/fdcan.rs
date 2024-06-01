@@ -10,7 +10,7 @@ use embassy_sync::channel::{Channel, DynamicReceiver, DynamicSender};
 use embassy_sync::waitqueue::AtomicWaker;
 
 use crate::can::fd::peripheral::Registers;
-use crate::gpio::AFType;
+use crate::gpio::{AfType, OutputType, Pull, Speed};
 use crate::interrupt::typelevel::Interrupt;
 use crate::rcc::{self, RccPeripheral};
 use crate::{interrupt, peripherals, Peripheral};
@@ -181,8 +181,8 @@ impl<'d, T: Instance> CanConfigurator<'d, T> {
     ) -> CanConfigurator<'d, T> {
         into_ref!(peri, rx, tx);
 
-        rx.set_as_af(rx.af_num(), AFType::Input);
-        tx.set_as_af(tx.af_num(), AFType::OutputPushPull);
+        rx.set_as_af(rx.af_num(), AfType::Input(Pull::None));
+        tx.set_as_af(tx.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
 
         rcc::enable_and_reset::<T>();
 
@@ -190,8 +190,8 @@ impl<'d, T: Instance> CanConfigurator<'d, T> {
         config.timestamp_source = TimestampSource::Prescaler(TimestampPrescaler::_1);
         T::registers().into_config_mode(config);
 
-        rx.set_as_af(rx.af_num(), AFType::Input);
-        tx.set_as_af(tx.af_num(), AFType::OutputPushPull);
+        rx.set_as_af(rx.af_num(), AfType::Input(Pull::None));
+        tx.set_as_af(tx.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
 
         unsafe {
             T::IT0Interrupt::unpend(); // Not unsafe

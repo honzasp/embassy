@@ -10,7 +10,7 @@ use embassy_hal_internal::PeripheralRef;
 pub use embedded_hal_02::spi::{Mode, Phase, Polarity, MODE_0, MODE_1, MODE_2, MODE_3};
 
 use crate::dma::{slice_ptr_parts, word, ChannelAndRequest};
-use crate::gpio::{AFType, AnyPin, Pull, SealedPin as _, Speed};
+use crate::gpio::{AfType, AnyPin, OutputType, Pull, SealedPin as _, Speed};
 use crate::mode::{Async, Blocking, Mode as PeriMode};
 use crate::pac::spi::{regs, vals, Spi as Regs};
 use crate::rcc::{self, RccInfo, SealedRccPeripheral};
@@ -90,11 +90,21 @@ impl Config {
         }
     }
 
-    fn sck_pull_mode(&self) -> Pull {
-        match self.mode.polarity {
-            Polarity::IdleLow => Pull::Down,
-            Polarity::IdleHigh => Pull::Up,
-        }
+    #[cfg(gpio_v1)]
+    fn sck_af(&self) -> AfType {
+        AfType::Output(OutputType::PushPull, Speed::VeryHigh)
+    }
+
+    #[cfg(gpio_v2)]
+    fn sck_af(&self) -> AfType {
+        AfType::OutputPull(
+            OutputType::PushPull,
+            Speed::VeryHigh,
+            match self.mode.polarity {
+                Polarity::IdleLow => Pull::Down,
+                Polarity::IdleHigh => Pull::Up,
+            },
+        )
     }
 }
 /// SPI driver.
@@ -417,9 +427,9 @@ impl<'d> Spi<'d, Blocking> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
-            new_pin!(miso, AFType::Input, Speed::VeryHigh, config.miso_pull),
+            new_pin!(sck, config.sck_af()),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(miso, AfType::Input(config.miso_pull)),
             None,
             None,
             config,
@@ -435,9 +445,9 @@ impl<'d> Spi<'d, Blocking> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
+            new_pin!(sck, config.sck_af()),
             None,
-            new_pin!(miso, AFType::Input, Speed::VeryHigh, config.miso_pull),
+            new_pin!(miso, AfType::Input(config.miso_pull)),
             None,
             None,
             config,
@@ -453,8 +463,8 @@ impl<'d> Spi<'d, Blocking> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
+            new_pin!(sck, config.sck_af()),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             None,
             None,
@@ -474,7 +484,7 @@ impl<'d> Spi<'d, Blocking> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             None,
             None,
@@ -496,9 +506,9 @@ impl<'d> Spi<'d, Async> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
-            new_pin!(miso, AFType::Input, Speed::VeryHigh),
+            new_pin!(sck, config.sck_af()),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(miso, AfType::Input(config.miso_pull)),
             new_dma!(tx_dma),
             new_dma!(rx_dma),
             config,
@@ -516,9 +526,9 @@ impl<'d> Spi<'d, Async> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
+            new_pin!(sck, config.sck_af()),
             None,
-            new_pin!(miso, AFType::Input, Speed::VeryHigh),
+            new_pin!(miso, AfType::Input(config.miso_pull)),
             #[cfg(any(spi_v1, spi_f1, spi_v2))]
             new_dma!(tx_dma),
             #[cfg(any(spi_v3, spi_v4, spi_v5))]
@@ -538,8 +548,8 @@ impl<'d> Spi<'d, Async> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(sck, AFType::OutputPushPull, Speed::VeryHigh, config.sck_pull_mode()),
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
+            new_pin!(sck, config.sck_af()),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             new_dma!(tx_dma),
             None,
@@ -560,7 +570,7 @@ impl<'d> Spi<'d, Async> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(mosi, AFType::OutputPushPull, Speed::VeryHigh),
+            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             new_dma!(tx_dma),
             None,
