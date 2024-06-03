@@ -60,7 +60,7 @@ impl<'d> Flex<'d> {
             }
             #[cfg(gpio_v2)]
             {
-                r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
+                r.pupdr().modify(|w| w.set_pupdr(n, pull_to_pupdr(pull)));
                 r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
                 r.moder().modify(|w| w.set_moder(n, vals::Moder::INPUT));
             }
@@ -89,7 +89,7 @@ impl<'d> Flex<'d> {
             {
                 r.pupdr().modify(|w| w.set_pupdr(n, vals::Pupdr::FLOATING));
                 r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
-                r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
+                r.ospeedr().modify(|w| w.set_ospeedr(n, speed_to_ospeedr(speed)));
                 r.moder().modify(|w| w.set_moder(n, vals::Moder::OUTPUT));
             }
         });
@@ -129,9 +129,9 @@ impl<'d> Flex<'d> {
         critical_section::with(|_| {
             let r = self.pin.block();
             let n = self.pin.pin() as usize;
-            r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
+            r.pupdr().modify(|w| w.set_pupdr(n, pull_to_pupdr(pull)));
             r.otyper().modify(|w| w.set_ot(n, vals::Ot::OPENDRAIN));
-            r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
+            r.ospeedr().modify(|w| w.set_ospeedr(n, speed_to_ospeedr(speed)));
             r.moder().modify(|w| w.set_moder(n, vals::Moder::OUTPUT));
         });
     }
@@ -249,15 +249,11 @@ pub enum Pull {
 }
 
 #[cfg(gpio_v2)]
-impl From<Pull> for vals::Pupdr {
-    fn from(pull: Pull) -> Self {
-        use Pull::*;
-
-        match pull {
-            None => vals::Pupdr::FLOATING,
-            Up => vals::Pupdr::PULLUP,
-            Down => vals::Pupdr::PULLDOWN,
-        }
+const fn pull_to_pupdr(pull: Pull) -> vals::Pupdr {
+    match pull {
+        Pull::None => vals::Pupdr::FLOATING,
+        Pull::Up => vals::Pupdr::PULLUP,
+        Pull::Down => vals::Pupdr::PULLDOWN,
     }
 }
 
@@ -283,26 +279,22 @@ pub enum Speed {
 }
 
 #[cfg(gpio_v1)]
-impl From<Speed> for vals::Mode {
-    fn from(speed: Speed) -> Self {
-        match speed {
-            Speed::Low => vals::Mode::OUTPUT2MHZ,
-            Speed::Medium => vals::Mode::OUTPUT10MHZ,
-            Speed::VeryHigh => vals::Mode::OUTPUT50MHZ,
-        }
+const fn speed_to_mode(speed: Speed) -> vals::Mode {
+    match speed {
+        Speed::Low => vals::Mode::OUTPUT2MHZ,
+        Speed::Medium => vals::Mode::OUTPUT10MHZ,
+        Speed::VeryHigh => vals::Mode::OUTPUT50MHZ,
     }
 }
 
 #[cfg(gpio_v2)]
-impl From<Speed> for vals::Ospeedr {
-    fn from(speed: Speed) -> Self {
-        match speed {
-            Speed::Low => vals::Ospeedr::LOWSPEED,
-            Speed::Medium => vals::Ospeedr::MEDIUMSPEED,
-            #[cfg(not(syscfg_f0))]
-            Speed::High => vals::Ospeedr::HIGHSPEED,
-            Speed::VeryHigh => vals::Ospeedr::VERYHIGHSPEED,
-        }
+const fn speed_to_ospeedr(speed: Speed) -> vals::Ospeedr {
+    match speed {
+        Speed::Low => vals::Ospeedr::LOWSPEED,
+        Speed::Medium => vals::Ospeedr::MEDIUMSPEED,
+        #[cfg(not(syscfg_f0))]
+        Speed::High => vals::Ospeedr::HIGHSPEED,
+        Speed::VeryHigh => vals::Ospeedr::VERYHIGHSPEED,
     }
 }
 
@@ -540,58 +532,53 @@ pub enum OutputType {
 }
 
 #[cfg(gpio_v1)]
-impl From<OutputType> for vals::CnfOut {
-    fn from(output_type: OutputType) -> Self {
-        match output_type {
-            OutputType::PushPull => vals::CnfOut::ALTPUSHPULL,
-            OutputType::OpenDrain => vals::CnfOut::ALTOPENDRAIN,
-        }
+const fn output_type_to_cnf_out(output_type: OutputType) -> vals::CnfOut {
+    match output_type {
+        OutputType::PushPull => vals::CnfOut::ALTPUSHPULL,
+        OutputType::OpenDrain => vals::CnfOut::ALTOPENDRAIN,
     }
 }
 
 #[cfg(gpio_v2)]
-impl From<OutputType> for vals::Ot {
-    fn from(output_type: OutputType) -> Self {
-        match output_type {
-            OutputType::PushPull => vals::Ot::PUSHPULL,
-            OutputType::OpenDrain => vals::Ot::OPENDRAIN,
-        }
+const fn output_type_to_ot(output_type: OutputType) -> vals::Ot {
+    match output_type {
+        OutputType::PushPull => vals::Ot::PUSHPULL,
+        OutputType::OpenDrain => vals::Ot::OPENDRAIN,
     }
 }
 
 /// Alternate function type settings.
-#[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AfType(AfTypeInner);
-
-#[derive(Debug, Copy, Clone)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-enum AfTypeInner {
-    Input(Pull),
-    #[cfg(gpio_v1)]
-    Output(OutputType, Speed),
-    #[cfg(gpio_v2)]
-    Output(OutputType, Speed, Pull),
+#[derive(Copy, Clone)]
+#[cfg(gpio_v2)]
+pub struct AfType {
+    pupdr: vals::Pupdr,
+    ot: vals::Ot,
+    ospeedr: vals::Ospeedr,
 }
 
+#[cfg(gpio_v2)]
 impl AfType {
     /// Input with optional pullup or pulldown.
     pub const fn input(pull: Pull) -> Self {
-        Self(AfTypeInner::Input(pull))
+        Self {
+            pupdr: pull_to_pupdr(pull),
+            ot: vals::Ot::PUSHPULL,
+            ospeedr: vals::Ospeedr::LOWSPEED,
+        }
     }
 
     /// Output with output type and speed and no pull-up or pull-down.
     pub const fn output(output_type: OutputType, speed: Speed) -> Self {
-        #[cfg(gpio_v1)]
-        return Self(AfTypeInner::Output(output_type, speed));
-        #[cfg(gpio_v2)]
-        return Self(AfTypeInner::Output(output_type, speed, Pull::None));
+        Self::output_pull(output_type, speed, Pull::None)
     }
 
     /// Output with output type, speed and pull-up or pull-down;
-    #[cfg(gpio_v2)]
     pub const fn output_pull(output_type: OutputType, speed: Speed, pull: Pull) -> Self {
-        Self(AfTypeInner::Output(output_type, speed, pull))
+        Self {
+            pupdr: pull_to_pupdr(pull),
+            ot: output_type_to_ot(output_type),
+            ospeedr: speed_to_ospeedr(speed),
+        }
     }
 }
 
@@ -627,6 +614,7 @@ pub(crate) trait SealedPin {
         self.block().bsrr().write(|w| w.set_br(n, true));
     }
 
+    /*
     #[cfg(gpio_v1)]
     #[inline]
     fn set_as_af(&self, _af_num: u8, af_type: AfType) {
@@ -662,6 +650,7 @@ pub(crate) trait SealedPin {
             }
         }
     }
+    */
 
     #[cfg(gpio_v2)]
     #[inline]
@@ -669,20 +658,9 @@ pub(crate) trait SealedPin {
         let r = self.block();
         let n = self._pin() as usize;
         r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
-        match af_type.0 {
-            AfTypeInner::Input(pull) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
-                r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
-                // OSPEEDR should be irrelevant for an input pin, but let's be defensive and set it
-                // to the reset state
-                r.ospeedr().modify(|w| w.set_ospeedr(n, vals::Ospeedr::LOWSPEED));
-            }
-            AfTypeInner::Output(output_type, speed, pull) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
-                r.otyper().modify(|w| w.set_ot(n, output_type.into()));
-                r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
-            }
-        }
+        r.pupdr().modify(|w| w.set_pupdr(n, af_type.pupdr));
+        r.otyper().modify(|w| w.set_ot(n, af_type.ot));
+        r.ospeedr().modify(|w| w.set_ospeedr(n, af_type.ospeedr));
         r.moder().modify(|w| w.set_moder(n, vals::Moder::ALTERNATE));
     }
 
