@@ -278,8 +278,8 @@ impl<'d, T: Instance> Driver<'d, T> {
         #[cfg(not(stm32l1))]
         {
             use crate::gpio::{AfType, OutputType, Speed};
-            dp.set_as_af(dp.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-            dm.set_as_af(dm.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+            dp.set_as_af(dp.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
+            dm.set_as_af(dm.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
         }
         #[cfg(stm32l1)]
         let _ = (dp, dm); // suppress "unused" warnings.

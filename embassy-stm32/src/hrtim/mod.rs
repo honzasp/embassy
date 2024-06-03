@@ -82,7 +82,7 @@ macro_rules! advanced_channel_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(OutputType::PushPull, Speed::VeryHigh),
+                        AfType::output(OutputType::PushPull, Speed::VeryHigh),
                     );
                 });
                 PwmPin {
@@ -100,7 +100,7 @@ macro_rules! advanced_channel_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(OutputType::PushPull, Speed::VeryHigh),
+                        AfType::output(OutputType::PushPull, Speed::VeryHigh),
                     );
                 });
                 ComplementaryPwmPin {

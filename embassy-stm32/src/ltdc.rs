@@ -62,10 +62,10 @@ impl<'d, T: Instance> Ltdc<'d, T> {
 
         rcc::enable_and_reset::<T>();
 
-        //new_pin!(clk, AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+        //new_pin!(clk, AfType::output(OutputType::PushPull, Speed::VeryHigh));
 
         // Set Tearing Enable pin according to CubeMx example
-        //te.set_as_af_pull(te.af_num(), AfType::Output(OutputType::PushPull, Speed::Low));
+        //te.set_as_af_pull(te.af_num(), AfType::output(OutputType::PushPull, Speed::Low));
         /*
                 T::regs().wcr().modify(|w| {
                     w.set_dsien(true);

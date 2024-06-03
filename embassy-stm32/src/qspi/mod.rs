@@ -248,12 +248,15 @@ impl<'d, T: Instance> Qspi<'d, T, Blocking> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(d0, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d1, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d2, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d3, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(sck, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(nss, AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)),
+            new_pin!(d0, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d1, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d2, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d3, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sck, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(
+                nss,
+                AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)
+            ),
             None,
             config,
             FlashSelection::Flash1,
@@ -273,12 +276,15 @@ impl<'d, T: Instance> Qspi<'d, T, Blocking> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(d0, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d1, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d2, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d3, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(sck, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(nss, AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)),
+            new_pin!(d0, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d1, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d2, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d3, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sck, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(
+                nss,
+                AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)
+            ),
             None,
             config,
             FlashSelection::Flash2,
@@ -301,12 +307,15 @@ impl<'d, T: Instance> Qspi<'d, T, Async> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(d0, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d1, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d2, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d3, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(sck, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(nss, AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)),
+            new_pin!(d0, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d1, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d2, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d3, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sck, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(
+                nss,
+                AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)
+            ),
             new_dma!(dma),
             config,
             FlashSelection::Flash1,
@@ -327,12 +336,15 @@ impl<'d, T: Instance> Qspi<'d, T, Async> {
     ) -> Self {
         Self::new_inner(
             peri,
-            new_pin!(d0, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d1, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d2, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(d3, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(sck, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(nss, AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)),
+            new_pin!(d0, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d1, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d2, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(d3, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sck, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(
+                nss,
+                AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up)
+            ),
             new_dma!(dma),
             config,
             FlashSelection::Flash2,

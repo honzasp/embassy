@@ -34,7 +34,7 @@ macro_rules! complementary_channel_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        crate::gpio::AfType::Output(output_type, crate::gpio::Speed::VeryHigh),
+                        crate::gpio::AfType::output(output_type, crate::gpio::Speed::VeryHigh),
                     );
                 });
                 ComplementaryPwmPin {

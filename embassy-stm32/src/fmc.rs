@@ -76,7 +76,7 @@ macro_rules! config_pins {
     ($($pin:ident),*) => {
         into_ref!($($pin),*);
         $(
-            $pin.set_as_af($pin.af_num(), AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up));
+            $pin.set_as_af($pin.af_num(), AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up));
         )*
     };
 }

@@ -83,10 +83,10 @@ impl<'d, T: GeneralInstance32bit4Channel> SimplePwm32<'d, T> {
         let mut ch2 = Flex::new(ch2);
         let mut ch3 = Flex::new(ch3);
         let mut ch4 = Flex::new(ch4);
-        ch1.set_as_af_unchecked(af1, AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        ch2.set_as_af_unchecked(af2, AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        ch3.set_as_af_unchecked(af3, AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        ch4.set_as_af_unchecked(af4, AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+        ch1.set_as_af_unchecked(af1, AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        ch2.set_as_af_unchecked(af2, AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        ch3.set_as_af_unchecked(af3, AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        ch4.set_as_af_unchecked(af4, AfType::output(OutputType::PushPull, Speed::VeryHigh));
 
         let mut this = Self {
             tim: LLTimer::new(tim),

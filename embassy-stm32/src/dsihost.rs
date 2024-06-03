@@ -80,7 +80,7 @@ impl<'d, T: Instance> DsiHost<'d, T> {
         rcc::enable_and_reset::<T>();
 
         // Set Tearing Enable pin according to CubeMx example
-        te.set_as_af(te.af_num(), AfType::Output(OutputType::PushPull, Speed::Low));
+        te.set_as_af(te.af_num(), AfType::output(OutputType::PushPull, Speed::Low));
         /*
                 T::regs().wcr().modify(|w| {
                     w.set_dsien(true);

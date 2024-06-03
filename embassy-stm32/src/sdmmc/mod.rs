@@ -294,11 +294,11 @@ pub struct Sdmmc<'d, T: Instance, Dma: SdmmcDma<T> = NoDma> {
     card: Option<Card>,
 }
 
-const CLK_AF: AfType = AfType::Output(OutputType::PushPull, Speed::VeryHigh);
+const CLK_AF: AfType = AfType::output(OutputType::PushPull, Speed::VeryHigh);
 #[cfg(gpio_v1)]
-const CMD_AF: AfType = AfType::Output(OutputType::PushPull, Speed::VeryHigh);
+const CMD_AF: AfType = AfType::output(OutputType::PushPull, Speed::VeryHigh);
 #[cfg(gpio_v2)]
-const CMD_AF: AfType = AfType::OutputPull(OutputType::PushPull, Speed::VeryHigh, Pull::Up);
+const CMD_AF: AfType = AfType::output_pull(OutputType::PushPull, Speed::VeryHigh, Pull::Up);
 const DATA_AF: AfType = CMD_AF;
 
 #[cfg(sdmmc_v1)]

@@ -139,9 +139,9 @@ impl<'d, M: Mode> I2c<'d, M> {
         scl.set_as_af(
             scl.af_num(),
             #[cfg(gpio_v1)]
-            AfType::Output(OutputType::OpenDrain, Speed::VeryHigh),
+            AfType::output(OutputType::OpenDrain, Speed::VeryHigh),
             #[cfg(gpio_v2)]
-            AfType::OutputPull(
+            AfType::output_pull(
                 OutputType::OpenDrain,
                 Speed::VeryHigh,
                 match config.scl_pullup {
@@ -153,9 +153,9 @@ impl<'d, M: Mode> I2c<'d, M> {
         sda.set_as_af(
             sda.af_num(),
             #[cfg(gpio_v1)]
-            AfType::Output(OutputType::OpenDrain, Speed::VeryHigh),
+            AfType::output(OutputType::OpenDrain, Speed::VeryHigh),
             #[cfg(gpio_v2)]
-            AfType::OutputPull(
+            AfType::output_pull(
                 OutputType::OpenDrain,
                 Speed::VeryHigh,
                 match config.sda_pullup {

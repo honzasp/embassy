@@ -180,7 +180,7 @@ impl<'d> I2S<'d> {
         into_ref!(sd);
         Self::new_inner(
             peri,
-            new_pin!(sd, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sd, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             ws,
             ck,
@@ -209,7 +209,7 @@ impl<'d> I2S<'d> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(sd, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(sd, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             ws,
             ck,
             mck,
@@ -244,8 +244,8 @@ impl<'d> I2S<'d> {
         into_ref!(txsd, rxsd);
         Self::new_inner(
             peri,
-            new_pin!(txsd, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(rxsd, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(txsd, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(rxsd, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             ws,
             ck,
             mck,
@@ -292,9 +292,9 @@ impl<'d> I2S<'d> {
     ) -> Self {
         into_ref!(ws, ck, mck);
 
-        ws.set_as_af(ws.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        ck.set_as_af(ck.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        mck.set_as_af(mck.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+        ws.set_as_af(ws.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        ck.set_as_af(ck.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        mck.set_as_af(mck.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
 
         let mut spi_cfg = SpiConfig::default();
         spi_cfg.frequency = freq;

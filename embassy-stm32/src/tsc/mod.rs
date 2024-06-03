@@ -371,7 +371,7 @@ macro_rules! group_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(
+                        AfType::output(
                             match role {
                                 PinType::Channel => OutputType::PushPull,
                                 PinType::Sample => OutputType::OpenDrain,
@@ -395,7 +395,7 @@ macro_rules! group_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(
+                        AfType::output(
                             match role {
                                 PinType::Channel => OutputType::PushPull,
                                 PinType::Sample => OutputType::OpenDrain,
@@ -419,7 +419,7 @@ macro_rules! group_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(
+                        AfType::output(
                             match role {
                                 PinType::Channel => OutputType::PushPull,
                                 PinType::Sample => OutputType::OpenDrain,
@@ -443,7 +443,7 @@ macro_rules! group_impl {
                     pin.set_low();
                     pin.set_as_af(
                         pin.af_num(),
-                        AfType::Output(
+                        AfType::output(
                             match role {
                                 PinType::Channel => OutputType::PushPull,
                                 PinType::Sample => OutputType::OpenDrain,

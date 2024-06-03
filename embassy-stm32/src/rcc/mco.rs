@@ -101,7 +101,7 @@ impl<'d, T: McoInstance> Mco<'d, T> {
 
         critical_section::with(|_| unsafe {
             T::_apply_clock_settings(source, prescaler);
-            pin.set_as_af(pin.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+            pin.set_as_af(pin.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
         });
 
         Self { phantom: PhantomData }

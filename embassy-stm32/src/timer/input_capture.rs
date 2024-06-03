@@ -40,7 +40,7 @@ macro_rules! channel_impl {
             #[doc = concat!("Create a new ", stringify!($channel), " capture pin instance.")]
             pub fn $new_chx(pin: impl Peripheral<P = impl $pin_trait<T>> + 'd, pull: Pull) -> Self {
                 into_ref!(pin);
-                pin.set_as_af(pin.af_num(), AfType::Input(pull));
+                pin.set_as_af(pin.af_num(), AfType::input(pull));
                 CapturePin {
                     _pin: pin.map_into(),
                     phantom: PhantomData,

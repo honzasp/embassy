@@ -35,7 +35,7 @@ macro_rules! channel_impl {
                 into_ref!(pin);
                 critical_section::with(|_| {
                     pin.set_low();
-                    pin.set_as_af(pin.af_num(), AfType::Output(output_type, Speed::VeryHigh));
+                    pin.set_as_af(pin.af_num(), AfType::output(output_type, Speed::VeryHigh));
                 });
                 PwmPin {
                     _pin: pin.map_into(),

@@ -92,12 +92,12 @@ impl Config {
 
     #[cfg(gpio_v1)]
     fn sck_af(&self) -> AfType {
-        AfType::Output(OutputType::PushPull, Speed::VeryHigh)
+        AfType::output(OutputType::PushPull, Speed::VeryHigh)
     }
 
     #[cfg(gpio_v2)]
     fn sck_af(&self) -> AfType {
-        AfType::OutputPull(
+        AfType::output_pull(
             OutputType::PushPull,
             Speed::VeryHigh,
             match self.mode.polarity {
@@ -428,8 +428,8 @@ impl<'d> Spi<'d, Blocking> {
         Self::new_inner(
             peri,
             new_pin!(sck, config.sck_af()),
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(miso, AfType::Input(config.miso_pull)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(miso, AfType::input(config.miso_pull)),
             None,
             None,
             config,
@@ -447,7 +447,7 @@ impl<'d> Spi<'d, Blocking> {
             peri,
             new_pin!(sck, config.sck_af()),
             None,
-            new_pin!(miso, AfType::Input(config.miso_pull)),
+            new_pin!(miso, AfType::input(config.miso_pull)),
             None,
             None,
             config,
@@ -464,7 +464,7 @@ impl<'d> Spi<'d, Blocking> {
         Self::new_inner(
             peri,
             new_pin!(sck, config.sck_af()),
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             None,
             None,
@@ -484,7 +484,7 @@ impl<'d> Spi<'d, Blocking> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             None,
             None,
@@ -507,8 +507,8 @@ impl<'d> Spi<'d, Async> {
         Self::new_inner(
             peri,
             new_pin!(sck, config.sck_af()),
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
-            new_pin!(miso, AfType::Input(config.miso_pull)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(miso, AfType::input(config.miso_pull)),
             new_dma!(tx_dma),
             new_dma!(rx_dma),
             config,
@@ -528,7 +528,7 @@ impl<'d> Spi<'d, Async> {
             peri,
             new_pin!(sck, config.sck_af()),
             None,
-            new_pin!(miso, AfType::Input(config.miso_pull)),
+            new_pin!(miso, AfType::input(config.miso_pull)),
             #[cfg(any(spi_v1, spi_f1, spi_v2))]
             new_dma!(tx_dma),
             #[cfg(any(spi_v3, spi_v4, spi_v5))]
@@ -549,7 +549,7 @@ impl<'d> Spi<'d, Async> {
         Self::new_inner(
             peri,
             new_pin!(sck, config.sck_af()),
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             new_dma!(tx_dma),
             None,
@@ -570,7 +570,7 @@ impl<'d> Spi<'d, Async> {
         Self::new_inner(
             peri,
             None,
-            new_pin!(mosi, AfType::Output(OutputType::PushPull, Speed::VeryHigh)),
+            new_pin!(mosi, AfType::output(OutputType::PushPull, Speed::VeryHigh)),
             None,
             new_dma!(tx_dma),
             None,

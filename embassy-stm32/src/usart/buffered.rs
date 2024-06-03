@@ -228,8 +228,8 @@ impl<'d> BufferedUart<'d> {
 
         rcc::enable_and_reset::<T>();
 
-        rts.set_as_af(rts.af_num(), AfType::Output(OutputType::PushPull, Speed::Medium));
-        cts.set_as_af(cts.af_num(), AfType::Input(Pull::None));
+        rts.set_as_af(rts.af_num(), AfType::output(OutputType::PushPull, Speed::Medium));
+        cts.set_as_af(cts.af_num(), AfType::input(Pull::None));
         T::info().regs.cr3().write(|w| {
             w.set_rtse(true);
             w.set_ctse(true);
@@ -254,7 +254,7 @@ impl<'d> BufferedUart<'d> {
 
         rcc::enable_and_reset::<T>();
 
-        de.set_as_af(de.af_num(), AfType::Output(OutputType::PushPull, Speed::Medium));
+        de.set_as_af(de.af_num(), AfType::output(OutputType::PushPull, Speed::Medium));
         T::info().regs.cr3().write(|w| {
             w.set_dem(true);
         });
@@ -281,8 +281,8 @@ impl<'d> BufferedUart<'d> {
         unsafe { state.rx_buf.init(rx_buffer.as_mut_ptr(), len) };
 
         let r = info.regs;
-        rx.set_as_af(rx.af_num(), AfType::Input(Pull::None));
-        tx.set_as_af(tx.af_num(), AfType::Output(OutputType::PushPull, Speed::Medium));
+        rx.set_as_af(rx.af_num(), AfType::input(Pull::None));
+        tx.set_as_af(tx.af_num(), AfType::output(OutputType::PushPull, Speed::Medium));
 
         configure(info, kernel_clock, &config, true, true)?;
 

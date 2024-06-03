@@ -39,7 +39,7 @@ macro_rules! config_ulpi_pins {
         into_ref!($($pin),*);
         critical_section::with(|_| {
             $(
-                $pin.set_as_af($pin.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+                $pin.set_as_af($pin.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
             )*
         })
     };
@@ -75,8 +75,8 @@ impl<'d, T: Instance> Driver<'d, T> {
     ) -> Self {
         into_ref!(dp, dm);
 
-        dp.set_as_af(dp.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
-        dm.set_as_af(dm.af_num(), AfType::Output(OutputType::PushPull, Speed::VeryHigh));
+        dp.set_as_af(dp.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
+        dm.set_as_af(dm.af_num(), AfType::output(OutputType::PushPull, Speed::VeryHigh));
 
         let regs = T::regs();
 

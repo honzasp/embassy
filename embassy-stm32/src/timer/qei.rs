@@ -37,7 +37,7 @@ macro_rules! channel_impl {
                 into_ref!(pin);
                 critical_section::with(|_| {
                     pin.set_low();
-                    pin.set_as_af(pin.af_num(), AfType::Input(Pull::None));
+                    pin.set_as_af(pin.af_num(), AfType::input(Pull::None));
                 });
                 QeiPin {
                     _pin: pin.map_into(),

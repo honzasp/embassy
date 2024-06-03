@@ -24,7 +24,7 @@ impl<'d, T: GeneralInstance4Channel> PwmInput<'d, T> {
     ) -> Self {
         into_ref!(pin);
 
-        pin.set_as_af(pin.af_num(), AfType::Input(pull));
+        pin.set_as_af(pin.af_num(), AfType::input(pull));
 
         Self::new_inner(tim, freq, Channel::Ch1, Channel::Ch2)
     }
@@ -38,7 +38,7 @@ impl<'d, T: GeneralInstance4Channel> PwmInput<'d, T> {
     ) -> Self {
         into_ref!(pin);
 
-        pin.set_as_af(pin.af_num(), AfType::Input(pull));
+        pin.set_as_af(pin.af_num(), AfType::input(pull));
 
         Self::new_inner(tim, freq, Channel::Ch2, Channel::Ch1)
     }

@@ -562,14 +562,37 @@ impl From<OutputType> for vals::Ot {
 /// Alternate function type settings.
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum AfType {
-    /// Input with optional pullup or pulldown.
+pub struct AfType(AfTypeInner);
+
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+enum AfTypeInner {
     Input(Pull),
-    /// Output with output type and speed and no pull-up or pull-down.
+    #[cfg(gpio_v1)]
     Output(OutputType, Speed),
     #[cfg(gpio_v2)]
+    Output(OutputType, Speed, Pull),
+}
+
+impl AfType {
+    /// Input with optional pullup or pulldown.
+    pub const fn input(pull: Pull) -> Self {
+        Self(AfTypeInner::Input(pull))
+    }
+
+    /// Output with output type and speed and no pull-up or pull-down.
+    pub const fn output(output_type: OutputType, speed: Speed) -> Self {
+        #[cfg(gpio_v1)]
+        return Self(AfTypeInner::Output(output_type, speed));
+        #[cfg(gpio_v2)]
+        return Self(AfTypeInner::Output(output_type, speed, Pull::None));
+    }
+
     /// Output with output type, speed and pull-up or pull-down;
-    OutputPull(OutputType, Speed, Pull),
+    #[cfg(gpio_v2)]
+    pub const fn output_pull(output_type: OutputType, speed: Speed, pull: Pull) -> Self {
+        Self(AfTypeInner::Output(output_type, speed, pull))
+    }
 }
 
 pub(crate) trait SealedPin {
@@ -612,8 +635,8 @@ pub(crate) trait SealedPin {
         // _af_num should be zero here, since it is not set by stm32-data
         let r = self.block();
         let n = self._pin() as usize;
-        match af_type {
-            AfType::Input(pull) => {
+        match af_type.0 {
+            AfTypeInner::Input(pull) => {
                 let cnf = match pull {
                     Pull::Up => {
                         r.bsrr().write(|w| w.set_bs(n, true));
@@ -631,7 +654,7 @@ pub(crate) trait SealedPin {
                     w.set_cnf_in(n % 8, cnf);
                 });
             }
-            AfType::Output(output_type, speed) => {
+            AfTypeInner::Output(output_type, speed) => {
                 r.cr(n / 8).modify(|w| {
                     w.set_mode(n % 8, speed.into());
                     w.set_cnf_out(n % 8, output_type.into());
@@ -646,20 +669,15 @@ pub(crate) trait SealedPin {
         let r = self.block();
         let n = self._pin() as usize;
         r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
-        match af_type {
-            AfType::Input(pull) => {
+        match af_type.0 {
+            AfTypeInner::Input(pull) => {
                 r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
                 r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
                 // OSPEEDR should be irrelevant for an input pin, but let's be defensive and set it
                 // to the reset state
                 r.ospeedr().modify(|w| w.set_ospeedr(n, vals::Ospeedr::LOWSPEED));
             }
-            AfType::Output(output_type, speed) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, vals::Pupdr::FLOATING));
-                r.otyper().modify(|w| w.set_ot(n, output_type.into()));
-                r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
-            }
-            AfType::OutputPull(output_type, speed, pull) => {
+            AfTypeInner::Output(output_type, speed, pull) => {
                 r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
                 r.otyper().modify(|w| w.set_ot(n, output_type.into()));
                 r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));

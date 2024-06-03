@@ -660,13 +660,13 @@ fn get_af_types(mode: Mode, tx_rx: TxRx) -> (AfType, AfType) {
     (
         //sd is defined by tx/rx mode
         match tx_rx {
-            TxRx::Transmitter => AfType::Output(OutputType::PushPull, Speed::VeryHigh),
-            TxRx::Receiver => AfType::Input(Pull::None),
+            TxRx::Transmitter => AfType::output(OutputType::PushPull, Speed::VeryHigh),
+            TxRx::Receiver => AfType::input(Pull::None),
         },
         //clocks (mclk, sck and fs) are defined by master/slave
         match mode {
-            Mode::Master => AfType::Output(OutputType::PushPull, Speed::VeryHigh),
-            Mode::Slave => AfType::Input(Pull::None),
+            Mode::Master => AfType::output(OutputType::PushPull, Speed::VeryHigh),
+            Mode::Slave => AfType::input(Pull::None),
         },
     )
 }
