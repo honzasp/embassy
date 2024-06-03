@@ -572,6 +572,72 @@ pub enum AfType {
     OutputPull(OutputType, Speed, Pull),
 }
 
+#[inline(never)]
+#[cfg(gpio_v1)]
+fn set_as_af(pin_port: u8, _af_num: u8, af_type: AfType) {
+    // F1 uses the AFIO register for remapping.
+    // For now, this is not implemented, so af_num is ignored
+    // _af_num should be zero here, since it is not set by stm32-data
+    let pin = unsafe { AnyPin::steal(pin_port) };
+    let r = pin.block();
+    let n = pin._pin() as usize;
+    match af_type {
+        AfType::Input(pull) => {
+            let cnf = match pull {
+                Pull::Up => {
+                    r.bsrr().write(|w| w.set_bs(n, true));
+                    vals::CnfIn::PULL
+                }
+                Pull::Down => {
+                    r.bsrr().write(|w| w.set_br(n, true));
+                    vals::CnfIn::PULL
+                }
+                Pull::None => vals::CnfIn::FLOATING,
+            };
+
+            r.cr(n / 8).modify(|w| {
+                w.set_mode(n % 8, vals::Mode::INPUT);
+                w.set_cnf_in(n % 8, cnf);
+            });
+        }
+        AfType::Output(output_type, speed) => {
+            r.cr(n / 8).modify(|w| {
+                w.set_mode(n % 8, speed.into());
+                w.set_cnf_out(n % 8, output_type.into());
+            });
+        }
+    }
+}
+
+#[inline(never)]
+#[cfg(gpio_v2)]
+fn set_as_af(pin_port: u8, af_num: u8, af_type: AfType) {
+    let pin = unsafe { AnyPin::steal(pin_port) };
+    let r = pin.block();
+    let n = pin._pin() as usize;
+    r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
+    match af_type {
+        AfType::Input(pull) => {
+            r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
+            r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
+            // OSPEEDR should be irrelevant for an input pin, but let's be defensive and set it
+            // to the reset state
+            r.ospeedr().modify(|w| w.set_ospeedr(n, vals::Ospeedr::LOWSPEED));
+        }
+        AfType::Output(output_type, speed) => {
+            r.pupdr().modify(|w| w.set_pupdr(n, vals::Pupdr::FLOATING));
+            r.otyper().modify(|w| w.set_ot(n, output_type.into()));
+            r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
+        }
+        AfType::OutputPull(output_type, speed, pull) => {
+            r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
+            r.otyper().modify(|w| w.set_ot(n, output_type.into()));
+            r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
+        }
+    }
+    r.moder().modify(|w| w.set_moder(n, vals::Moder::ALTERNATE));
+}
+
 pub(crate) trait SealedPin {
     fn pin_port(&self) -> u8;
 
@@ -604,68 +670,9 @@ pub(crate) trait SealedPin {
         self.block().bsrr().write(|w| w.set_br(n, true));
     }
 
-    #[cfg(gpio_v1)]
-    #[inline]
-    fn set_as_af(&self, _af_num: u8, af_type: AfType) {
-        // F1 uses the AFIO register for remapping.
-        // For now, this is not implemented, so af_num is ignored
-        // _af_num should be zero here, since it is not set by stm32-data
-        let r = self.block();
-        let n = self._pin() as usize;
-        match af_type {
-            AfType::Input(pull) => {
-                let cnf = match pull {
-                    Pull::Up => {
-                        r.bsrr().write(|w| w.set_bs(n, true));
-                        vals::CnfIn::PULL
-                    }
-                    Pull::Down => {
-                        r.bsrr().write(|w| w.set_br(n, true));
-                        vals::CnfIn::PULL
-                    }
-                    Pull::None => vals::CnfIn::FLOATING,
-                };
-
-                r.cr(n / 8).modify(|w| {
-                    w.set_mode(n % 8, vals::Mode::INPUT);
-                    w.set_cnf_in(n % 8, cnf);
-                });
-            }
-            AfType::Output(output_type, speed) => {
-                r.cr(n / 8).modify(|w| {
-                    w.set_mode(n % 8, speed.into());
-                    w.set_cnf_out(n % 8, output_type.into());
-                });
-            }
-        }
-    }
-
-    #[cfg(gpio_v2)]
     #[inline]
     fn set_as_af(&self, af_num: u8, af_type: AfType) {
-        let r = self.block();
-        let n = self._pin() as usize;
-        r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
-        match af_type {
-            AfType::Input(pull) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
-                r.otyper().modify(|w| w.set_ot(n, vals::Ot::PUSHPULL));
-                // OSPEEDR should be irrelevant for an input pin, but let's be defensive and set it
-                // to the reset state
-                r.ospeedr().modify(|w| w.set_ospeedr(n, vals::Ospeedr::LOWSPEED));
-            }
-            AfType::Output(output_type, speed) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, vals::Pupdr::FLOATING));
-                r.otyper().modify(|w| w.set_ot(n, output_type.into()));
-                r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
-            }
-            AfType::OutputPull(output_type, speed, pull) => {
-                r.pupdr().modify(|w| w.set_pupdr(n, pull.into()));
-                r.otyper().modify(|w| w.set_ot(n, output_type.into()));
-                r.ospeedr().modify(|w| w.set_ospeedr(n, speed.into()));
-            }
-        }
-        r.moder().modify(|w| w.set_moder(n, vals::Moder::ALTERNATE));
+        set_as_af(self.pin_port(), af_num, af_type)
     }
 
     #[inline]
