@@ -582,6 +582,19 @@ impl AfType {
     }
 }
 
+#[inline(never)]
+#[cfg(gpio_v2)]
+fn set_as_af(pin_port: u8, af_num: u8, af_type: AfType) {
+    let pin = unsafe { AnyPin::steal(pin_port) };
+    let r = pin.block();
+    let n = pin._pin() as usize;
+    r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
+    r.pupdr().modify(|w| w.set_pupdr(n, af_type.pupdr));
+    r.otyper().modify(|w| w.set_ot(n, af_type.ot));
+    r.ospeedr().modify(|w| w.set_ospeedr(n, af_type.ospeedr));
+    r.moder().modify(|w| w.set_moder(n, vals::Moder::ALTERNATE));
+}
+
 pub(crate) trait SealedPin {
     fn pin_port(&self) -> u8;
 
@@ -652,16 +665,9 @@ pub(crate) trait SealedPin {
     }
     */
 
-    #[cfg(gpio_v2)]
     #[inline]
     fn set_as_af(&self, af_num: u8, af_type: AfType) {
-        let r = self.block();
-        let n = self._pin() as usize;
-        r.afr(n / 8).modify(|w| w.set_afr(n % 8, af_num));
-        r.pupdr().modify(|w| w.set_pupdr(n, af_type.pupdr));
-        r.otyper().modify(|w| w.set_ot(n, af_type.ot));
-        r.ospeedr().modify(|w| w.set_ospeedr(n, af_type.ospeedr));
-        r.moder().modify(|w| w.set_moder(n, vals::Moder::ALTERNATE));
+        set_as_af(self.pin_port(), af_num, af_type)
     }
 
     #[inline]
